@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Vivado runtime files
+.Xil/
+*.jou
+*.log
+*.str
+*.wdb
+*.pb
+*.rpx
+*.dcp
+*.bit
+*.ltx
+*.xsa
+*.xpr
+*.lpr
+
+# Project build outputs
+build/
+hw_bringup/build/
+
+# Local scratch / tool state
+NA/

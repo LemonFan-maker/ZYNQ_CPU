@@ -1,0 +1,9 @@
+connect
+targets -set -filter {name =~ "ARM*#0"}
+rst -system
+fpga -f ./build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit
+source ./build/vivado_hw/zynq_cpu_hw.gen/sources_1/bd/zynq_cpu_system/ip/zynq_cpu_system_processing_system7_0_0/ps7_init.tcl
+ps7_init
+ps7_post_config
+dow ./hw_bringup/build/ps_uart_probe.elf
+con
