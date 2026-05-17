@@ -1,49 +1,84 @@
 # ALINX AX7020B Board Notes
 
-## FPGA
+## Board Target
 
 - Board: ALINX AX7020B
 - Part: `xc7z020clg400-2`
 - Package: `clg400`
 - Speed grade: `-2`
+- Current Vivado version: 2025.2
 
-These values were taken from the generated PS7 constraints file:
+## Clock
+
+The current hardware build uses PS `FCLK0` as the PL clock. The observed build
+uses about 75 MHz:
 
 ```text
-/home/orionisli/Working/Zynq_GPGPU/Zynq_GPGPU_Core.gen/sources_1/bd/gpu_system/ip/gpu_system_processing_system7_0_0/gpu_system_processing_system7_0_0.xdc
+FCLK0: 75.002 MHz
 ```
 
-## PS Clock
+Keep new RTL synchronous to this clock until there is a measured reason to add
+another clock domain.
 
-The existing PS7 constraints define `FCLKCLK[0]` as:
+## PS UART
 
-```tcl
-create_clock -name clk_fpga_0 -period "13.333" [get_pins "PS7_i/FCLKCLK[0]"]
-```
-
-That corresponds to about 75 MHz. The first PL CPU top should use this clock
-until there is a measured reason to change it.
-
-## UART
-
-The existing design uses PS UART1:
+The board bring-up flow currently reports through PS UART1. The known pin/MIO
+mapping from the existing PS7 setup is:
 
 | Signal | MIO | Pin | Direction |
 | --- | ---: | --- | --- |
 | UART1 RX | 49 | C12 | input |
 | UART1 TX | 48 | B12 | output |
 
-Early bring-up can use PS UART for boot/debug messages from the PS side. The PL
-CPU still needs its own memory-mapped UART or an AXI path to an existing UART if
-we want Linux console output from the custom CPU.
+Use:
+
+```sh
+./scripts/serial_monitor.sh /dev/ttyUSB0 115200
+```
+
+If no device path is supplied, the script tries the first `/dev/ttyUSB*` or
+`/dev/ttyACM*`.
 
 ## DDR
 
-User-provided memory target:
+The project uses the Zynq PS DDR controller. Do not build a separate PL DDR
+controller for this board path.
 
-- DDR3 device: `MT41K256M16RE-125`
-- Data width: 32-bit
+Current DDR assumptions:
 
-For this Zynq design, DDR is owned by the PS DDR controller. The PL CPU should
-access DDR through a PS AXI HP port rather than implementing a PL DDR controller.
+- target device: `MT41K256M16RE-125`
+- data width: 32-bit
+- PL CPU virtual/CPU DDR base: `0x8000_0000`
+- PS physical DDR base used by the bridge: `0x0010_0000`
 
+Current hardware has two DDR access paths from PL:
+
+- AXI DataMover through PS HP for bulk block transfers
+- direct single-beat AXI4 master bridge for PL CPU load/store/fetch
+
+Both paths have passed board smoke tests.
+
+## Hardware Outputs
+
+The hardware bring-up build command is:
+
+```sh
+./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl
+```
+
+Expected generated outputs:
+
+- `build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit`
+- `build/vivado_hw/zynq_cpu_system_wrapper.xsa`
+- generated PS7 initialization files under `build/vivado_hw/zynq_cpu_hw.gen/`
+
+The download script expects those generated paths:
+
+```sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
+```
+
+## Environment Rule
+
+Use the wrapper scripts instead of direct `vivado` or `xsct` invocations. They
+source `/home/orionisli/.zshrc`, call `vi25`, and then run the AMD/Xilinx tool.

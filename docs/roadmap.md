@@ -1,129 +1,121 @@
 # Roadmap
 
-## Guiding Decision
+The project goal is still a custom PL CPU that can boot riscv32 Linux with a
+BusyBox initramfs. The current state is well past first RTL bring-up, but still
+before real Linux integration.
 
-The CPU is custom, but the instruction set should not be invented from scratch.
-Linux already supports RISC-V, so the practical route is to implement a RISC-V
-CPU from scratch and grow it until it satisfies the Linux execution environment.
+## Completed Bring-Up Milestones
 
-Starting with a private ISA would require a compiler backend, binutils, kernel
-port, ABI, libc work, and userspace rebuilds before any CPU hardware issue can
-be debugged. That is not a good first path.
+These are already represented in code and tests:
 
-## Phase 0: Project Rules
+- local RV32-style core execution in simulation
+- assembler and minimal ELF generation flow
+- PS-loadable PL CPU programs
+- AXI-Lite PS-to-PL register probe
+- DataMover loopback through PS DDR
+- PL CPU initiated DataMover transfers
+- ELF loading and reset-vector selection
+- M-mode trap smoke
+- S-mode trap smoke
+- timer interrupt delegation to S-mode
+- boot payload handoff with `a0=hartid`, `a1=dtb`
+- S-mode counter CSR access
+- direct DDR load/store from PL CPU
+- instruction fetch and execution from the DDR window
+- SBI-style firmware and timer smoke tests
+- Vivado 2025.2 bitstream generation with timing met at the current 75 MHz
+  target
 
-- Keep the core small and testable.
-- Use Verilog/SystemVerilog RTL that Vivado can synthesize.
-- Every ISA feature gets simulation tests before FPGA bring-up.
-- Do not optimize for performance until correctness is visible.
-- Treat Linux as a late-stage integration target, not the first test.
+## Current Development Stage
 
-## Phase 1: RV32I Core
-
-Goal: run small bare-metal programs in simulation.
-
-Required blocks:
-
-- Program counter
-- Instruction fetch
-- Decoder
-- Register file
-- ALU
-- Load/store unit
-- Branch/jump unit
-- Trap placeholder
-
-Recommended first microarchitecture:
-
-- Multi-cycle core, not pipelined.
-- One instruction retires after several states.
-- Unified memory interface for simulation.
-- No cache.
-- No interrupts.
-- No MMU.
-
-This is slower, but much easier to debug.
-
-## Phase 2: FPGA Bare-Metal
-
-Goal: run a hand-written or compiled bare-metal program from BRAM.
-
-Required blocks:
-
-- BRAM instruction/data memory
-- UART output
-- Reset vector
-- Simple linker script
-- RISC-V cross toolchain flow
-
-Success condition:
-
-- The CPU prints text through UART or writes a known memory-mapped register.
-
-## Phase 3: Zynq PS DDR Access Through DataMover
-
-Goal: let the PL CPU request block transfers to and from PS DDR.
-
-Recommended path:
+The active stage is:
 
 ```text
-PL CPU -> MMIO DataMover control -> AXI DataMover -> Zynq PS S_AXI_HP port -> PS DDR
+turn board-proven smoke tests into a Linux boot substrate
 ```
 
-The PS side must initialize DDR and release the PL CPU reset after the bitstream
-and clocks are ready.
+That means moving from tiny hand-written payloads to a real firmware/kernel
+loading path and a documented platform ABI.
 
-This is not a transparent random-access memory port. For Linux, this approach
-will need a local-memory/cache/page-refill layer above DataMover, or a later
-direct AXI master load/store path if the DataMover-only design becomes too
-restrictive.
+## Next Milestone: Real Firmware Contract
 
-Current control register draft:
+Goal: run an M-mode firmware layer that can enter a larger S-mode payload using
+the same convention Linux expects.
 
-| Offset | Name | Description |
-| --- | --- | --- |
-| `0x00` | control | bit 0 starts MM2S, bit 1 starts S2MM |
-| `0x04` | status | busy/done/error/channel-ready bits |
-| `0x08` | ddr_addr | PS DDR address |
-| `0x0c` | local_addr | reserved for local stream mover |
-| `0x10` | length | transfer length in bytes |
-| `0x14` | tag | DataMover command tag |
+Required work:
 
+- decide whether to adapt OpenSBI or keep a small local SBI shim first
+- implement the required SBI base and timer behavior beyond smoke-test calls
+- define hart ID and DTB address ownership
+- place firmware, payload, and DTB in DDR through the PS loader
+- make failures visible through UART/mailbox diagnostics
 
-## Phase 4: Linux-Capable CPU
+Suggested first target:
 
-Linux requires far more than RV32I.
+```text
+M-mode firmware in local RAM or DDR
+  -> S-mode payload in DDR
+  -> SBI console/timer probes
+```
 
-Minimum target:
+## Next Milestone: Device Tree and Platform ABI
 
-- RV32IMA or a kernel configuration that avoids atomics where possible
-- Machine CSRs
-- Supervisor mode
-- Exceptions and interrupts
-- Timer interrupt
-- External interrupt path
-- Sv32 MMU
-- Page table walker
-- TLB
-- Correct memory ordering for the selected platform
-- Device tree
+Goal: write a DTB that accurately describes the current platform.
 
-Strongly recommended:
+Required decisions:
 
-- I-cache
-- D-cache or carefully documented uncached behavior
-- UART compatible with a simple Linux driver
-- CLINT-like timer block
-- PLIC-like interrupt controller
+- memory node for the DDR window starting at `0x8000_0000`
+- CPU node and ISA string
+- timer source and timebase frequency
+- interrupt controller representation
+- UART/console path
+- reserved memory for firmware, DTB, and initramfs
 
-## Phase 5: Linux + BusyBox
+If the existing custom timer/IRQ blocks are kept, Linux needs compatible drivers
+or firmware must hide them behind SBI where possible.
 
-Initial boot path:
+## Next Milestone: Linux Kernel Smoke
 
-1. PS FSBL initializes DDR and clocks.
-2. PS loads PL bitstream.
-3. PS places kernel image, device tree, and initramfs in DDR.
-4. PS releases PL CPU reset.
-5. PL boot ROM jumps into a small RISC-V bootloader.
-6. Bootloader enters Linux with the expected register convention.
-7. Linux mounts initramfs and starts BusyBox init.
+Goal: reach early Linux boot text, then a small initramfs shell.
+
+Required work:
+
+- build a riscv32 kernel configured for the implemented ISA/platform
+- choose early console strategy
+- load kernel image, DTB, and initramfs into DDR from PS
+- enter kernel with the RISC-V boot convention
+- debug early traps through the firmware/probe mailbox
+
+Expected blockers:
+
+- privileged architecture corner cases
+- Sv32 permission/accessed/dirty/page-fault behavior
+- atomics and memory ordering under kernel code
+- timer interrupt rate and SBI behavior
+- no cache and low single-beat DDR performance
+
+## Technical Debt Before Linux
+
+Address these before treating Linux failures as kernel-level issues:
+
+- add broader instruction/CSR compliance tests
+- add MMU-focused simulation tests with valid/invalid PTE cases
+- add interrupt priority/delegation tests
+- test direct DDR load/store with wider address and alignment cases
+- decide whether scratchpad memories should become explicit block RAMs
+- document and enforce generated artifact cleanup through `.gitignore`
+
+## Later Performance Work
+
+Performance is intentionally not the first priority. After Linux reaches a
+reliable early boot, consider:
+
+- instruction cache
+- data cache or a documented uncached memory model
+- burst-capable DDR bridge
+- prefetch for instruction fetch from DDR
+- larger local memories
+- pipelining the core
+
+Do not start with these unless a correctness milestone is blocked by current
+performance.

@@ -1,66 +1,124 @@
-# Architecture Notes
+# Architecture
 
-## ISA
+This document describes the current RTL architecture, not the original plan.
 
-The planned ISA is RISC-V, starting at RV32I.
-
-Final Linux-oriented target:
+## System Shape
 
 ```text
-RV32IMA + Zicsr + privileged architecture + Sv32
+PS UART / XSCT
+  -> ARM-side ps_uart_probe.elf
+  -> AXI GP0 register windows in PL
+  -> zx32_soc
+       -> zx32_core
+       -> local IMEM / scratchpad
+       -> MMIO UART, timer, interrupt controller, DataMover control
+       -> AXI DataMover for bulk DDR transfers
+       -> AXI4 master bridge for direct PS DDR load/store/fetch
 ```
 
-Optional later extensions:
+The PS side still owns bootstrapping: PS initializes DDR, configures the PL,
+loads the ARM-side probe, writes PL CPU test programs, and releases the PL CPU
+from reset.
 
-- `C`: compressed instructions, improves code density.
-- `F/D`: floating point, not required for a first BusyBox system.
+## Core
 
-## First Core Shape
+The core is a multi-cycle in-order RV32 design. It is intentionally simple:
 
-The first implementation should be a multi-cycle in-order core:
+- one instruction is processed through explicit fetch/decode/execute/memory/
+  writeback-style states
+- no instruction or data cache
+- no pipeline hazards to manage yet
+- memory requests are held until the selected local, MMIO, or DDR target is
+  ready
+
+Implemented execution substrate:
+
+- RV32I-style integer operations, branches, jumps, loads, stores, fences
+- RV32M multiply/divide
+- RV32A word atomics, including LR/SC reservation tracking
+- CSR instructions and a first privileged-architecture substrate
+- M-mode and S-mode trap/return paths
+- timer and external interrupt injection
+- RV32 counter CSRs
+- Sv32 page-table walking, small TLB, and `sfence.vma`
+- three local custom instructions for bring-up/DataMover control
+
+## PL CPU Memory Map
+
+These addresses are seen by software running on the PL CPU.
+
+| Region | Base | Purpose |
+| --- | ---: | --- |
+| Boot/local RAM | `0x0000_0000` | reset code and early tests loaded by PS |
+| UART | `0x1000_0000` | simple PL MMIO UART transmitter |
+| Timer | `0x1001_0000` | `mtime`, `mtimecmp`, timer IRQ |
+| DataMover control | `0x1002_0000` | bulk DDR DMA command/status registers |
+| CPU control | `0x1003_0000` | reset/status/sizing control block |
+| Interrupt controller | `0x1004_0000` | pending/enable/threshold/claim registers |
+| Scratchpad | `0x2000_0000` | CPU and DataMover local stream endpoint |
+| PS DDR window | `0x8000_0000` | direct DDR load/store/fetch window |
+
+The DDR window is translated by `rtl/bus/axi4_master_bridge.sv`:
 
 ```text
-RESET -> FETCH -> DECODE -> EXECUTE -> MEMORY -> WRITEBACK -> FETCH
+PL CPU 0x8000_0000 -> PS physical 0x0010_0000
 ```
 
-This avoids pipeline hazards during the first bring-up. A pipeline can be added
-after the ISA tests and FPGA BRAM boot work.
+The bridge currently issues single-beat 32-bit AXI4 reads and writes. It is good
+enough for smoke tests and early firmware, but not a cache or high-performance
+memory system.
 
-## Memory Map Draft
+## PS-Side AXI Register Windows
 
-This is a draft and will change once the Vivado design is fixed.
+The ARM-side bring-up probe uses these PS-visible addresses:
 
-| Region | Address | Size | Purpose |
-| --- | ---: | ---: | --- |
-| Boot ROM / BRAM | `0x0000_0000` | 64 KiB | reset code |
-| UART | `0x1000_0000` | 4 KiB | console |
-| Timer | `0x1001_0000` | 4 KiB | machine timer |
-| DataMover control | `0x1002_0000` | 4 KiB | DDR block move |
-| CPU reset/control | `0x1003_0000` | 4 KiB | bring-up and reset |
-| Interrupt controller | `0x1004_0000` | 64 KiB | external interrupts |
-| RX scratchpad | `0x2000_0000` | small | DataMover MM2S destination |
-| TX scratchpad | `0x2001_0000` | small | DataMover S2MM source |
-| PS DDR window | `0x8000_0000` | board-defined | Linux RAM |
+| PS address | Region |
+| ---: | --- |
+| `0x43c0_0000` | build-id/status/scratch AXI-Lite probe registers |
+| `0x43c1_0000` | DataMover and PL CPU control aperture |
+| `0x43c1_1000` | RX scratch region |
+| `0x43c1_2000` | TX scratch/mailbox region |
+| `0x43c1_3000` | PL CPU IMEM load window |
+| `0x43c1_7000` | PL CPU reset/status/reset-vector control |
 
-## Counter And Timer Model
+The detailed PS-side constants live in `hw_bringup/ps_uart_probe.h`.
 
-The core has RV32-style counter CSRs for `mcycle/minstret` and their
-`cycle/time/instret` user-visible aliases. `mcounteren` controls S/U access,
-and `scounteren` controls U access once S-mode has been entered.
+## Timer and Interrupt Model
 
-For now, `time/timeh` aliases the same internal 64-bit cycle counter used by
-`mcycle/mcycleh`. The MMIO timer remains the interrupt source in the platform
-map. Before a real Linux boot, the time source needs to be made compatible with
-the chosen RISC-V platform contract, either through an SBI/CLINT-like mtime path
-or a clearly fixed-frequency local counter.
+`rtl/periph/mmio_timer.sv` exposes:
 
-## Zynq DDR Boundary
+| Offset | Register |
+| ---: | --- |
+| `0x00` | `mtime[31:0]` |
+| `0x04` | `mtime[63:32]` |
+| `0x08` | `mtimecmp[31:0]` |
+| `0x0c` | `mtimecmp[63:32]` |
+| `0x10` | timer IRQ status |
 
-The DDR3 attached to Zynq-7020 is normally controlled by the PS DDR controller.
-The PL CPU will control an AXI DataMover instance connected to a PS
-high-performance slave port. DataMover is a block-transfer engine, so the CPU
-will initially execute from local BRAM and request explicit DDR transfers rather
-than issuing every load/store directly to DDR.
+`rtl/periph/mmio_irqctrl.sv` exposes:
 
-Do not build a PL DDR controller first unless the board physically routes DDR
-to PL pins, which normal Zynq-7020 boards do not.
+| Offset | Register |
+| ---: | --- |
+| `0x00` | pending bits |
+| `0x04` | enable bits |
+| `0x08` | threshold |
+| `0x0c` | claim/complete |
+| `0x10` | raw source bits |
+
+This is enough for the current S-mode timer and external interrupt smoke tests.
+A Linux-targeted platform still needs a stable device-tree contract and either a
+driver-compatible device model or firmware that hides these details behind SBI.
+
+## Linux Readiness
+
+The current architecture has many of the CPU-side pieces Linux needs, but the
+platform contract is still incomplete. Before attempting a real Linux boot, the
+project needs:
+
+- a loader path for kernel image, DTB, and initramfs in DDR
+- an M-mode firmware layer or minimal OpenSBI-compatible shim
+- final hart entry convention: `a0=hartid`, `a1=dtb`
+- a DTB that describes the actual UART/timer/interrupt/memory map
+- validation of Sv32 against real Linux page-table behavior
+- a decision on cache/uncached memory behavior and memory ordering
+- enough UART/console support for early kernel logs

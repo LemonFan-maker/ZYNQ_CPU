@@ -1,14 +1,17 @@
-# Synthesis Status
+# Synthesis and Implementation Status
 
-## Current RTL-Only Check
+This file records the last known-good synthesis/implementation state. Re-run the
+commands after RTL or Vivado block-design changes.
+
+## RTL-Only Synthesis
 
 Command:
 
 ```sh
-scripts/run_vivado.sh -mode batch -source vivado/synth_zx32_soc.tcl
+./scripts/run_vivado.sh -mode batch -source vivado/synth_zx32_soc.tcl
 ```
 
-Current result:
+Last recorded result:
 
 - Vivado version: 2025.2 through `vi25`
 - Top: `zx32_soc`
@@ -25,17 +28,10 @@ Resource snapshot:
 | Block RAM Tile | 4 | 140 | 2.86% |
 | DSPs | 12 | 220 | 5.45% |
 
-## Notes
+The standalone RTL synthesis script does not provide full board timing context,
+so use it as a synthesizability/resource check rather than final timing signoff.
 
-The boot BRAM is inferred as block RAM. The current RX/TX scratchpad memories
-are intentionally small and infer as distributed RAM. Replace them with XPM or
-Block Memory Generator RAMs before increasing the scratchpad size.
-
-The standalone RTL synthesis script still has no XDC timing constraints, so the
-timing summary reports `NA` for WNS/TNS. The block-design/bitstream build needs
-board clocks and generated constraints before timing closure is meaningful.
-
-## Current Hardware Bitstream Build
+## Hardware Bring-Up Build
 
 Command:
 
@@ -43,7 +39,7 @@ Command:
 ./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl
 ```
 
-Current result:
+Last recorded result:
 
 - Vivado version: 2025.2 through `vi25`
 - Top: `zynq_cpu_system_wrapper`
@@ -74,7 +70,30 @@ Resource snapshot:
 | Block RAM Tile | 5.5 | 140 | 3.93% |
 | DSPs | 12 | 220 | 5.45% |
 
+## Timing Notes
+
 The current timing closure depends on keeping memory request address/data paths
-registered inside the core. In particular, AMO load data is now registered before
-AMO result calculation, and data-memory addresses are registered before memory
-states drive the SoC bus.
+registered inside the core and SoC. In particular:
+
+- AMO load data is registered before AMO result calculation.
+- data-memory addresses are registered before memory states drive the SoC bus.
+- the direct DDR bridge is single-beat and serialized, which keeps the early
+  timing surface small.
+
+## Memory Implementation Notes
+
+- Boot/local RAM infers block RAM.
+- Current scratchpad storage is intentionally small.
+- Before increasing scratchpad size, prefer a block-RAM-oriented implementation
+  or explicit XPM/Block Memory Generator RAMs.
+
+## When to Rebuild
+
+Run the hardware bring-up build after changes to:
+
+- `rtl/`
+- `vivado/build_hw_bringup.tcl`
+- block-design wrapper files
+- AXI interface widths or memory maps
+
+For PS probe C-only changes, `./scripts/build_ps_uart_probe.sh` is enough.

@@ -1,80 +1,117 @@
-# DataMover Memory Plan
+# DDR and DataMover
 
-The DDR path is based on AXI DataMover rather than a custom PL DDR controller.
+The current design has two separate DDR paths. Keep them conceptually separate
+when debugging.
+
+## Direct DDR Path
 
 ```text
-zx32 CPU
-  -> native MMIO store/load
-  -> datamover_ctrl
+PL CPU instruction/data request
+  -> zx32_soc DDR decode
+  -> axi4_master_bridge
+  -> Zynq PS S_AXI_HP
+  -> PS DDR controller
+```
+
+The direct bridge maps:
+
+```text
+PL CPU 0x8000_0000 -> PS physical 0x0010_0000
+```
+
+Current behavior:
+
+- single-beat 32-bit AXI4 reads and writes
+- used for PL CPU DDR random access smoke tests
+- used for PL CPU instruction fetch from DDR
+- no cache
+- no burst fetch
+- no outstanding request queue
+
+This is enough to prove correctness of direct DDR access. It is not yet a Linux
+memory subsystem.
+
+## DataMover Path
+
+```text
+PL CPU or PS probe
+  -> datamover_ctrl registers
   -> AXI DataMover command/status streams
   -> AXI DataMover M_AXI MM2S/S2MM
   -> Zynq PS S_AXI_HP
   -> PS DDR controller
-  -> MT41K256M16RE-125 DDR3
 ```
 
-## Important Boundary
+The DataMover path remains useful for:
 
-AXI DataMover is a DMA/block-transfer engine. It does not behave like a normal
-CPU memory port for arbitrary single-cycle instruction fetches or load/store
-operations.
+- high-confidence PS DDR block-transfer smoke tests
+- custom PL CPU DataMover instructions
+- future DMA-style movement between DDR and local buffers
 
-The first usable memory model is therefore:
+It is not a transparent CPU memory port by itself.
 
-- CPU executes from local BRAM.
-- CPU configures `datamover_ctrl` over MMIO.
-- DataMover copies DDR blocks into a local stream/BRAM endpoint.
-- DataMover copies local stream/BRAM blocks back to DDR.
+## PL CPU DataMover Register Map
 
-For a Linux-capable system, this implies one of two later designs:
-
-- Keep DataMover as the DDR transport and build a local cache/page-refill engine
-  around it.
-- Add a direct AXI load/store master later and keep DataMover for bulk DMA.
-
-## MMIO Register Map
-
-Base address: `0x1002_0000`
+PL CPU base address: `0x1002_0000`
 
 | Offset | Register | Access | Description |
 | ---: | --- | --- | --- |
 | `0x00` | control | W | bit 0 starts MM2S, bit 1 starts S2MM |
 | `0x04` | status | R/W1C | busy/done/error/channel-ready flags |
-| `0x08` | ddr_addr | R/W | DDR byte address |
-| `0x0c` | local_addr | R/W | reserved for local BRAM/stream endpoint |
+| `0x08` | ddr_addr | R/W | PS physical DDR byte address |
+| `0x0c` | local_addr | R/W | local scratchpad byte address |
 | `0x10` | length | R/W | bytes to transfer |
 | `0x14` | tag | R/W | 4-bit DataMover command tag |
 | `0x18` | mm2s_status_raw | R | last MM2S status byte |
 | `0x1c` | s2mm_status_raw | R | last S2MM status byte |
 
-## Local Scratchpad Map
+Status bits from `rtl/bus/datamover_ctrl.sv`:
 
-The current local endpoint is split into two memories so the RTL stays easy to
-synthesize:
+| Bit | Mask | Meaning |
+| ---: | ---: | --- |
+| 0 | `0x0000_0001` | MM2S busy |
+| 1 | `0x0000_0002` | S2MM busy |
+| 2 | `0x0000_0004` | MM2S done |
+| 3 | `0x0000_0008` | S2MM done |
+| 4 | `0x0000_0010` | MM2S error |
+| 5 | `0x0000_0020` | S2MM error |
+| 6 | `0x0000_0040` | MM2S command ready |
+| 7 | `0x0000_0080` | S2MM command ready |
 
-| Region | Base | Direction | Owner |
-| --- | ---: | --- | --- |
-| RX scratch | `0x2000_0000` | DDR to local | DataMover MM2S writes, CPU reads |
-| TX scratch | `0x2001_0000` | local to DDR | CPU writes, DataMover S2MM reads |
+## PS Probe DataMover Aperture
 
-Default size is currently 256 32-bit words per direction. This is intentionally
-small for early bring-up. The final design should replace these inferred
-scratch memories with XPM or Block Memory Generator RAMs before increasing the
-buffer size.
+The ARM-side bring-up probe sees the DataMover/control aperture at
+`0x43c1_0000`.
 
-## DataMover Command
+| PS address | Purpose |
+| ---: | --- |
+| `0x43c1_0000` | DataMover control |
+| `0x43c1_1000` | RX scratch |
+| `0x43c1_2000` | TX scratch and mailbox |
+| `0x43c1_3000` | PL CPU IMEM load window |
+| `0x43c1_7000` | PL CPU reset/status/reset-vector |
 
-The controller currently emits the default 72-bit DataMover command form for a
-32-bit address configuration:
+## Scratchpad
 
-- bits `[22:0]`: bytes to transfer
-- bit `[23]`: burst type, set to INCR
+`rtl/periph/axis_scratchpad.sv` is currently configured with 256 32-bit words by
+default. It serves both CPU MMIO accesses and DataMover local stream endpoints.
+
+The scratchpad is deliberately small for bring-up. Replace or parameterize it
+with a block-RAM-oriented implementation before increasing it substantially.
+
+## Command Format
+
+`datamover_ctrl` emits the 72-bit DataMover command format currently expected by
+the Vivado IP configuration:
+
+- bits `[22:0]`: byte count
+- bit `[23]`: INCR burst
 - bits `[29:24]`: DSA, currently zero
-- bit `[30]`: EOF, set
+- bit `[30]`: EOF
 - bit `[31]`: DRR, set for S2MM and clear for MM2S
-- bits `[63:32]`: DDR address
-- bits `[67:64]`: tag
+- bits `[63:32]`: DDR byte address
+- bits `[67:64]`: command tag
 - bits `[71:68]`: zero
 
-This command layout is isolated inside `rtl/bus/datamover_ctrl.sv` so it can be
-adjusted if the Vivado IP configuration changes.
+If the Vivado DataMover IP settings change, update this encoding and rerun the
+DataMover loopback and custom instruction smoke tests before trusting DDR data.
