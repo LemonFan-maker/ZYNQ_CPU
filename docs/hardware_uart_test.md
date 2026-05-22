@@ -54,22 +54,40 @@ The probe source is split by responsibility:
 ./scripts/serial_monitor.sh /dev/ttyUSB0 115200
 ```
 
-The device argument is optional. If omitted, the script tries the first
-`/dev/ttyUSB*` or `/dev/ttyACM*`.
+The device argument is optional. If omitted, the script tries the first `/dev/ttyUSB*`.
 
-## Download and Run
+## Download and Run the Broad Probe
 
 ```sh
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
 ```
 
-The XSCT script programs the bitstream, runs PS7 initialization, downloads the
-ARM-side probe ELF, and starts it.
+The XSCT script programs the bitstream, runs PS7 initialization, downloads the ARM-side probe ELF, and starts it.
 
-## Expected PASS Sections
+This path runs the broad CPU/SoC smoke suite. It does not boot the real Linux kernel.
 
-The probe prints one PASS/FAIL line per section. A currently healthy run should
-include:
+## Download and Run Linux
+
+Build the Linux artifacts first:
+
+```sh
+./scripts/prepare_mainline_linux.sh
+./scripts/build_mainline_rv32_linux.sh
+./scripts/prepare_linux_boot_artifacts.sh
+./scripts/build_ps_uart_probe.sh
+```
+
+Then run the Linux boot launcher:
+
+```sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
+```
+
+This path starts `hw_bringup/build/ps_linux_boot.elf`, copies the Linux Image and DTB into DDR, loads the local M-mode SBI firmware into IMEM, and releases the PL CPU at the Linux entry.
+
+## Expected Broad Probe PASS Sections
+
+The probe prints one PASS/FAIL line per section. A currently healthy run should include:
 
 ```text
 > ZYNQ_CPU PL bring-up probe
@@ -114,36 +132,78 @@ ZYNQ_CPU DDR access smoke: PASS
 > PL CPU DDR instruction fetch smoke
 ZYNQ_CPU DDR instruction fetch smoke: PASS
 
+> PL CPU DDR high random access smoke
+ZYNQ_CPU DDR high access smoke: PASS
+
+> PL CPU DDR high instruction fetch smoke
+ZYNQ_CPU DDR high instruction fetch smoke: PASS
+
+> PL CPU DDR high AMO smoke
+ZYNQ_CPU DDR high AMO smoke: PASS
+
 > PL CPU SBI firmware smoke
 ZYNQ_CPU SBI firmware smoke: PASS
 
 > PL CPU SBI timer smoke
 ZYNQ_CPU SBI timer smoke: PASS
-```
 
-The probe now also includes the first Linux-facing contract test. This section
-is compile-verified, but still needs a board UART run before it should be
-treated as board-proven:
-
-```text
 > PL CPU Linux boot contract smoke
 ZYNQ_CPU Linux boot contract smoke: PASS
+
+> PL CPU Linux SBI compatibility smoke
+ZYNQ_CPU Linux SBI compatibility smoke: PASS
+
+> PL CPU Linux image layout smoke
+ZYNQ_CPU Linux image layout smoke: PASS
+```
+
+`Linux image layout smoke` may print `SKIP` if the Linux Image/DTB artifacts have not been prepared yet. Treat `PASS` as the expected result before a Linux boot run.
+
+## Expected Linux Boot Signature
+
+A currently healthy Linux boot run should include:
+
+```text
+> ZYNQ_CPU Linux boot launcher
+Kernel CPU: 0x80400000
+DTB CPU: 0x81600000
+IMEM verify: 0 errors
+Releasing PL CPU at Linux entry
+
+Linux SBI console mirror
+SBI specification v0.2 detected
+SBI implementation ID=0x5a32 Version=0x1
+SBI v0.2 TIME extension detected
+Run /init as init process
+
+[zx32-init] userspace entered
+[zx32-init] getpid ok
+[zx32-init] alive
+[zx32-init] idle
+Boot monitor: userspace idle reached
+```
+
+Useful timer sanity values in the final counter line:
+
+```text
+off_valid=1
+cmp > mtime
+time=<non-zero>
+get=<non-zero>
 ```
 
 ## What the Late-Stage Tests Prove
 
-- DDR random access smoke: PL CPU can load/store through the direct AXI DDR
-  bridge.
-- DDR instruction fetch smoke: reset vector can point at the DDR window and the
-  PL CPU can execute instructions fetched from DDR.
-- SBI firmware smoke: M-mode firmware can enter an S-mode payload and handle an
-  S-mode SBI call.
-- SBI timer smoke: M-mode firmware can handle the SBI timer extension smoke path
-  and return to S-mode after a timer interrupt.
-- Linux boot contract smoke, once board-confirmed: M-mode firmware enters an
-  S-mode payload with Linux-style `a0=hartid` and `a1=dtb`, the payload reads a
-  DTB-like magic word from DDR, calls SBI base/timer services, and observes a
-  delegated S-mode timer interrupt.
+- DDR random access smoke: PL CPU can load/store through the direct AXI DDR bridge.
+- DDR instruction fetch smoke: reset vector can point at the DDR window and the PL CPU can execute instructions fetched from DDR.
+- DDR high-address smokes: the direct bridge can reach the Linux-placement region used for the kernel and DTB, including AMO operations.
+- SBI firmware smoke: M-mode firmware can enter an S-mode payload and handle an S-mode SBI call.
+- SBI timer smoke: M-mode firmware can handle the SBI timer extension smoke path and return to S-mode after a timer interrupt.
+- Linux boot contract smoke: M-mode firmware enters an S-mode payload with Linux-style `a0=hartid` and `a1=dtb`, the payload reads a DTB-like magic word from DDR, calls SBI base/timer services, and observes a delegated S-mode timer interrupt.
+- Linux SBI compatibility smoke: the bring-up SBI behavior matches the pieces the real Linux boot path expects.
+- Linux image layout smoke: the kernel Image header, DTB magic, and configured DDR placement match the launcher assumptions.
+- Linux boot launcher: the real kernel reaches initramfs userspace and the userspace smoke reaches its idle marker.
 
-These are necessary Linux stepping stones, but they do not yet prove that a real
-Linux kernel will boot.
+These prove a minimal real Linux boot path. 
+
+They do not yet prove a full BusyBox userspace, production drivers, or performance.

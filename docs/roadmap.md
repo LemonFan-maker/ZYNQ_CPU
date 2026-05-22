@@ -1,12 +1,12 @@
 # Roadmap
 
-The project goal is still a custom PL CPU that can boot riscv32 Linux with a
-BusyBox initramfs. The current state is well past first RTL bring-up, but still
-before real Linux integration.
+The project goal is a custom PL CPU that can run a useful riscv32 Linux environment. 
+
+The first real Linux milestone is now complete: the board boots a mainline RV32 kernel into an embedded initramfs `/init`, completes a userspace `getpid` smoke test, and reaches a quiet idle loop.
 
 ## Completed Bring-Up Milestones
 
-These are already represented in code and tests:
+These are already represented in code, tests, or board logs:
 
 - local RV32-style core execution in simulation
 - assembler and minimal ELF generation flow
@@ -22,111 +22,128 @@ These are already represented in code and tests:
 - S-mode counter CSR access
 - direct DDR load/store from PL CPU
 - instruction fetch and execution from the DDR window
+- high-address DDR load/store, instruction fetch, and AMO smokes
 - SBI-style firmware and timer smoke tests
-- Vivado 2025.2 bitstream generation with timing met at the current 75 MHz
-  target
+- Linux boot contract smoke
+- Linux SBI compatibility smoke
+- Linux image layout smoke
+- PS-side real Linux Image/DTB loader
+- local SBI shim with console and TIME services sufficient for kernel boot
+- mainline RV32 Linux reaches `Run /init as init process`
+- embedded `/init` prints `userspace entered`, completes `getpid`, and reaches `idle`
+- Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
 
 ## Current Development Stage
 
 The active stage is:
 
 ```text
-turn board-proven smoke tests into a Linux boot substrate
+turn the board-proven Linux smoke boot into a useful minimal userspace
 ```
 
-That means moving from tiny hand-written payloads to a real firmware/kernel
-loading path and a documented platform ABI.
+The immediate success signature to preserve is:
 
-## Current Linux Bring-Up Scaffold
+```text
+[zx32-init] userspace entered
+[zx32-init] getpid ok
+[zx32-init] idle
+Boot monitor: userspace idle reached
+```
 
-The first Linux-facing files now live in `linux/`:
+Do not treat later Linux regressions as userspace or kernel bugs until this signature still reproduces with the same Image/DTB/firmware layout.
+
+## Current Linux Artifacts
+
+Source-of-truth files:
 
 - `docs/linux_bringup.md`
 - `docs/linux_boot_layout.md`
 - `linux/zynq_cpu.dts`
+- `linux/zx32_rv32.config`
+- `linux/initramfs/init.S`
+- `hw_bringup/ps_linux_boot.c`
+- `hw_bringup/programs/linux_boot_firmware.zx32.s`
+- `hw_bringup/download_zynq_cpu_linux_boot.xsbl`
 
-The corresponding board smoke sources are:
+Generated artifacts:
 
-- `hw_bringup/programs/linux_contract_firmware_smoke.zx32.s`
-- `hw_bringup/programs/linux_contract_payload_smoke.zx32.s`
-- `run_cpu_linux_contract_smoke_test()` in `hw_bringup/ps_uart_probe_sbi.c`
+- `linux/kernel/`
+- `build/linux-mainline-rv32/`
+- `build/linux-initramfs/`
+- `build/linux/`
+- `hw_bringup/build/`
 
-This scaffold is compile-verified and included in the PS UART probe. It still
-needs a board UART run before it moves into the completed milestone list.
+These generated paths are ignored and should not become source-of-truth.
 
-## Next Milestone: Real Firmware Contract
+## Next Milestone: Stable Linux Smoke Regression
 
-Goal: run an M-mode firmware layer that can enter a larger S-mode payload using
-the same convention Linux expects.
-
-Required work:
-
-- decide whether to adapt OpenSBI or keep a small local SBI shim first
-- implement the required SBI base and timer behavior beyond current smoke-test
-  calls
-- define hart ID and DTB address ownership
-- place firmware, payload, and DTB in DDR through the PS loader
-- make failures visible through UART/mailbox diagnostics
-
-Suggested first target:
-
-```text
-M-mode firmware in local RAM or DDR
-  -> S-mode payload in DDR
-  -> SBI console/timer probes
-```
-
-## Next Milestone: Device Tree and Platform ABI
-
-Goal: write a DTB that accurately describes the current platform.
-
-Required decisions:
-
-- memory node for the DDR window starting at `0x8000_0000`
-- CPU node and ISA string
-- timer source and timebase frequency
-- interrupt controller representation
-- UART/console path
-- reserved memory for firmware, DTB, and initramfs
-
-If the existing custom timer/IRQ blocks are kept, Linux needs compatible drivers
-or firmware must hide them behind SBI where possible.
-
-## Next Milestone: Linux Kernel Smoke
-
-Goal: reach early Linux boot text, then a small initramfs shell.
+Goal: make the current Linux boot easy to rerun and compare.
 
 Required work:
 
-- build a riscv32 kernel configured for the implemented ISA/platform
-- choose early console strategy
-- load kernel image, DTB, and initramfs into DDR from PS
-- enter kernel with the RISC-V boot convention
-- debug early traps through the firmware/probe mailbox
+- keep the final success condition as `Boot monitor: userspace idle reached`
+- reduce or gate noisy periodic monitor samples
+- keep a compact expected-log section in `docs/hardware_uart_test.md`
+- record the exact Image/DTB addresses through `build/linux/boot_artifacts.env`
+- make all Linux boot diagnostics explainable from `docs/linux_boot_layout.md`
 
-Expected blockers:
+## Next Milestone: Richer Tiny Userspace
 
-- privileged architecture corner cases
-- Sv32 permission/accessed/dirty/page-fault behavior
-- atomics and memory ordering under kernel code
-- timer interrupt rate and SBI behavior
-- no cache and low single-beat DDR performance
+Goal: expand `/init` before bringing in a larger userspace.
 
-## Technical Debt Before Linux
+Suggested syscall smokes:
 
-Address these before treating Linux failures as kernel-level issues:
+- `getpid`
+- `write`
+- `uname` or another simple read-only syscall
+- `clock_gettime` or `nanosleep` once timer behavior is stable enough
+- simple fork/exec only after memory behavior is better characterized
 
-- add broader instruction/CSR compliance tests
-- add MMU-focused simulation tests with valid/invalid PTE cases
+Keep this stage assembly-only or otherwise very small. The point is to isolate kernel/platform behavior before libc and BusyBox add noise.
+
+## Next Milestone: BusyBox or Minimal Libc Initramfs
+
+Goal: reach an interactive or scriptable userspace.
+
+Required work:
+
+- choose a riscv32 userspace toolchain and ABI strategy
+- build a static BusyBox or smaller libc-based init
+- decide whether `/dev/console` through `hvc0` is enough
+- verify initramfs size still fits before the DTB placement at `0x81600000`
+- keep the old assembly `/init` as a known-good fallback
+
+## Next Milestone: Firmware and Platform ABI Cleanup
+
+Goal: replace bring-up assumptions with a stable platform contract.
+
+Required work:
+
+- decide whether to keep the local SBI shim or move toward OpenSBI
+- document the permanent relationship between CSR `time` and MMIO `mtime`
+- clean up the current timer offset bridge if the clocks can be made identical
+- define which devices Linux should see directly and which should be hidden behind SBI
+- keep the DTB synchronized with real hardware and with any Linux-visible drivers
+- document reserved memory needs for firmware, DTB, and future initramfs growth
+
+## Next Milestone: CPU/Memory Correctness Around Linux
+
+Goal: expand regressions around behavior Linux actually exercises.
+
+Required work:
+
+- add MMU-focused simulation tests for valid/invalid PTE cases
+- add accessed/dirty and permission behavior tests around Linux page-table use
 - add interrupt priority/delegation tests
+- expand AMO/LR/SC and memory-ordering tests
 - test direct DDR load/store with wider address and alignment cases
 - decide whether scratchpad memories should become explicit block RAMs
-- document and enforce generated artifact cleanup through `.gitignore`
 
 ## Later Performance Work
 
-Performance is intentionally not the first priority. After Linux reaches a
-reliable early boot, consider:
+Performance is intentionally not the first priority. 
+
+After Linux reaches a reliable small userspace, consider:
 
 - instruction cache
 - data cache or a documented uncached memory model
@@ -135,5 +152,4 @@ reliable early boot, consider:
 - larger local memories
 - pipelining the core
 
-Do not start with these unless a correctness milestone is blocked by current
-performance.
+Do not start with these unless a correctness milestone is blocked by current performance.

@@ -1,7 +1,6 @@
 # Synthesis and Implementation Status
 
-This file records the last known-good synthesis/implementation state. Re-run the
-commands after RTL or Vivado block-design changes.
+This file records the last known-good synthesis/implementation state. Re-run the commands after RTL or Vivado block-design changes.
 
 ## RTL-Only Synthesis
 
@@ -28,8 +27,7 @@ Resource snapshot:
 | Block RAM Tile | 4 | 140 | 2.86% |
 | DSPs | 12 | 220 | 5.45% |
 
-The standalone RTL synthesis script does not provide full board timing context,
-so use it as a synthesizability/resource check rather than final timing signoff.
+The standalone RTL synthesis script does not provide full board timing context, so use it as a synthesizability/resource check rather than final timing signoff.
 
 ## Hardware Bring-Up Build
 
@@ -72,20 +70,17 @@ Resource snapshot:
 
 ## Timing Notes
 
-The current timing closure depends on keeping memory request address/data paths
-registered inside the core and SoC. In particular:
+The current timing closure depends on keeping memory request address/data paths registered inside the core and SoC. In particular:
 
 - AMO load data is registered before AMO result calculation.
 - data-memory addresses are registered before memory states drive the SoC bus.
-- the direct DDR bridge is single-beat and serialized, which keeps the early
-  timing surface small.
+- the direct DDR bridge is single-beat and serialized, which keeps the early timing surface small.
 
 ## Memory Implementation Notes
 
 - Boot/local RAM infers block RAM.
 - Current scratchpad storage is intentionally small.
-- Before increasing scratchpad size, prefer a block-RAM-oriented implementation
-  or explicit XPM/Block Memory Generator RAMs.
+- Before increasing scratchpad size, prefer a block-RAM-oriented implementation or explicit XPM/Block Memory Generator RAMs.
 
 ## When to Rebuild
 

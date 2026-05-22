@@ -1,7 +1,6 @@
 # DDR and DataMover
 
-The current design has two separate DDR paths. Keep them conceptually separate
-when debugging.
+The current design has two separate DDR paths. Keep them conceptually separate when debugging.
 
 ## Direct DDR Path
 
@@ -28,8 +27,9 @@ Current behavior:
 - no burst fetch
 - no outstanding request queue
 
-This is enough to prove correctness of direct DDR access. It is not yet a Linux
-memory subsystem.
+This is enough for the current Linux smoke boot, including kernel instruction fetches, kernel data accesses, page-table walks, and the tiny initramfs userspace. 
+
+It is still an uncached, single-beat bring-up path rather than a performance-oriented Linux memory subsystem.
 
 ## DataMover Path
 
@@ -93,16 +93,13 @@ The ARM-side bring-up probe sees the DataMover/control aperture at
 
 ## Scratchpad
 
-`rtl/periph/axis_scratchpad.sv` is currently configured with 256 32-bit words by
-default. It serves both CPU MMIO accesses and DataMover local stream endpoints.
+`rtl/periph/axis_scratchpad.sv` is currently configured with 256 32-bit words by default. It serves both CPU MMIO accesses and DataMover local stream endpoints.
 
-The scratchpad is deliberately small for bring-up. Replace or parameterize it
-with a block-RAM-oriented implementation before increasing it substantially.
+The scratchpad is deliberately small for bring-up. Replace or parameterize it with a block-RAM-oriented implementation before increasing it substantially.
 
 ## Command Format
 
-`datamover_ctrl` emits the 72-bit DataMover command format currently expected by
-the Vivado IP configuration:
+`datamover_ctrl` emits the 72-bit DataMover command format currently expected by the Vivado IP configuration:
 
 - bits `[22:0]`: byte count
 - bit `[23]`: INCR burst
@@ -113,5 +110,4 @@ the Vivado IP configuration:
 - bits `[67:64]`: command tag
 - bits `[71:68]`: zero
 
-If the Vivado DataMover IP settings change, update this encoding and rerun the
-DataMover loopback and custom instruction smoke tests before trusting DDR data.
+If the Vivado DataMover IP settings change, update this encoding and rerun the DataMover loopback and custom instruction smoke tests before trusting DDR data.

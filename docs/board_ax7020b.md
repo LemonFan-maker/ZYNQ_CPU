@@ -10,20 +10,17 @@
 
 ## Clock
 
-The current hardware build uses PS `FCLK0` as the PL clock. The observed build
-uses about 75 MHz:
+The current hardware build uses PS `FCLK0` as the PL clock. The observed build uses about 75 MHz:
 
 ```text
 FCLK0: 75.002 MHz
 ```
 
-Keep new RTL synchronous to this clock until there is a measured reason to add
-another clock domain.
+Keep new RTL synchronous to this clock until there is a measured reason to add another clock domain.
 
 ## PS UART
 
-The board bring-up flow currently reports through PS UART1. The known pin/MIO
-mapping from the existing PS7 setup is:
+The board bring-up flow currently reports through PS UART1. The known pin/MIO mapping from the existing PS7 setup is:
 
 | Signal | MIO | Pin | Direction |
 | --- | ---: | --- | --- |
@@ -36,13 +33,11 @@ Use:
 ./scripts/serial_monitor.sh /dev/ttyUSB0 115200
 ```
 
-If no device path is supplied, the script tries the first `/dev/ttyUSB*` or
-`/dev/ttyACM*`.
+If no device path is supplied, the script tries the first `/dev/ttyUSB*`.
 
 ## DDR
 
-The project uses the Zynq PS DDR controller. Do not build a separate PL DDR
-controller for this board path.
+The project uses the Zynq PS DDR controller. Do not build a separate PL DDR controller for this board path.
 
 Current DDR assumptions:
 
@@ -78,7 +73,27 @@ The download script expects those generated paths:
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
 ```
 
+The real Linux boot launcher uses the same bitstream and PS7 initialization, but downloads `hw_bringup/build/ps_linux_boot.elf` instead:
+
+```sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
+```
+
+Before running that launcher, prepare the Linux Image and DTB:
+
+```sh
+./scripts/build_mainline_rv32_linux.sh
+./scripts/prepare_linux_boot_artifacts.sh
+./scripts/build_ps_uart_probe.sh
+```
+
+The current Linux placement is:
+
+| Artifact | PL CPU address | PS physical address |
+| --- | ---: | ---: |
+| Linux Image | `0x8040_0000` | `0x0050_0000` |
+| DTB | `0x8160_0000` | `0x0170_0000` |
+
 ## Environment Rule
 
-Use the wrapper scripts instead of direct `vivado` or `xsct` invocations. They
-source `/home/orionisli/.zshrc`, call `vi25`, and then run the AMD/Xilinx tool.
+Use the wrapper scripts instead of direct `vivado` or `xsct` invocations. They source `/home/orionisli/.zshrc`, call `vi25`, and then run the AMD/Xilinx tool.

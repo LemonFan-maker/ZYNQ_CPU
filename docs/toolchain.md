@@ -2,19 +2,17 @@
 
 ## AMD/Xilinx Environment
 
-This project targets Vivado/Vitis 2025.2 through the local `vi25` shell
-function.
+This project targets Vivado/Vitis 2025.2 through the local `vi25` shell function.
 
-Project automation should not call `vivado` or `xsct` directly. Use the wrapper
-scripts so every command runs in the same environment:
+Project automation should not call `vivado` or `xsct` directly. Use the wrapper scripts so every command runs in the same environment:
 
 ```sh
 ./scripts/run_vivado.sh -mode batch -source vivado/synth_zx32_soc.tcl
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
 ```
 
-The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then
-invoke the requested tool.
+The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then invoke the requested tool.
 
 ## Script Inventory
 
@@ -25,6 +23,10 @@ invoke the requested tool.
 | `scripts/run_zx32_toolchain_tests.sh` | run assembler and ELF unit tests |
 | `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
+| `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
+| `scripts/build_zx32_initramfs.sh` | build the tiny RV32 `/init` payload and initramfs file list |
+| `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
+| `scripts/prepare_linux_boot_artifacts.sh` | build the DTB and validate the Linux Image/DTB layout |
 | `scripts/run_vivado.sh` | Vivado 2025.2 wrapper |
 | `scripts/run_xsct.sh` | XSCT 2025.2 wrapper |
 | `scripts/serial_monitor.sh` | open `picocom` on a board serial port |
@@ -68,8 +70,7 @@ Icarus currently prints warnings like:
 sorry: constant selects in always_* processes are not fully supported
 ```
 
-These are tool limitations/warnings in the current simulations. The pass/fail
-gate is still the script exit code and the testbench `PASS` lines.
+These are tool limitations/warnings in the current simulations. The pass/fail gate is still the script exit code and the testbench `PASS` lines.
 
 ## Build Commands
 
@@ -84,6 +85,17 @@ Build the PS UART probe:
 ```sh
 ./scripts/build_ps_uart_probe.sh
 ```
+
+Prepare and build the current Linux boot artifacts:
+
+```sh
+./scripts/prepare_mainline_linux.sh
+./scripts/build_mainline_rv32_linux.sh
+./scripts/prepare_linux_boot_artifacts.sh
+```
+
+`scripts/build_mainline_rv32_linux.sh` also runs
+`scripts/build_zx32_initramfs.sh` by default, unless `ZX32_INITRAMFS=0` is set.
 
 Run RTL-only Vivado synthesis:
 
@@ -111,6 +123,12 @@ Terminal 2:
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
 ```
 
+Real Linux boot path:
+
+```sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
+```
+
 ## Generated Outputs
 
 Common generated outputs:
@@ -118,6 +136,11 @@ Common generated outputs:
 - `hw_bringup/build/generated/zx32_programs.h`
 - `hw_bringup/build/elf/*.elf`
 - `hw_bringup/build/ps_uart_probe.elf`
+- `hw_bringup/build/ps_linux_boot.elf`
+- `linux/kernel/`
+- `build/linux-mainline-rv32/`
+- `build/linux-initramfs/`
+- `build/linux/`
 - `build/vivado_hw/`
 - `build/vivado_synth/`
 
@@ -125,12 +148,15 @@ These are build artifacts, not source-of-truth files.
 
 ## Linux Bring-Up Files
 
-The first Linux-facing source files are:
+The Linux-facing source files are:
 
 - `docs/linux_bringup.md`
 - `docs/linux_boot_layout.md`
 - `linux/zynq_cpu.dts`
+- `linux/zx32_rv32.config`
+- `linux/initramfs/init.S`
+- `hw_bringup/ps_linux_boot.c`
+- `hw_bringup/programs/linux_boot_firmware.zx32.s`
+- `hw_bringup/download_zynq_cpu_linux_boot.xsbl`
 
-They are not generated artifacts. Keep them version-controlled and update them
-whenever the boot address layout, DTB contract, timer model, or interrupt model
-changes.
+They are not generated artifacts. Keep them version-controlled and update them whenever the boot address layout, DTB contract, timer model, or interrupt model changes.

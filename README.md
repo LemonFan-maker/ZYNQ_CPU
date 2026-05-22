@@ -1,31 +1,21 @@
 # ZYNQ_CPU
 
-ZYNQ_CPU is a custom RV32-class CPU and SoC bring-up project for the Zynq-7020
-PL on the ALINX AX7020B board.
+ZYNQ_CPU is a custom RV32-class CPU and SoC bring-up project for the Zynq-7020 PL on the ALINX AX7020B board.
 
-The long-term target is to boot a riscv32 Linux kernel with a BusyBox initramfs.
-The current project is not a Linux system yet. It is a hardware bring-up and
-execution substrate with simulation tests, a Vivado block design, PS-controlled
-board tests, direct PS DDR access from the PL CPU, and early SBI-style smoke
-tests.
+The long-term target is to boot a usable riscv32 Linux environment on the PL CPU. The current tree has reached the first real Linux milestone: a mainline RV32 kernel boots on the board, uses the local SBI shim for early console and timer services, starts the embedded initramfs, runs `/init`, completes a `getpid` syscall smoke test, and reaches a quiet userspace idle loop. It is still a bring-up Linux environment rather than a full BusyBox system.
 
 ## Current Status
 
 Implemented and tested in the current tree:
 
 - Multi-cycle in-order RV32 core skeleton in `rtl/core/zx32_core.sv`.
-- RV32I-style integer execution, loads/stores, branches, jumps, fences, and
-  system instructions.
+- RV32I-style integer execution, loads/stores, branches, jumps, fences, and system instructions.
 - RV32M multiply/divide and RV32A word atomics.
-- Machine and supervisor CSR substrate, exception return, delegated traps, timer
-  interrupt path, external interrupt path, counters, `satp`, Sv32 page walking,
-  small TLB, and `sfence.vma`.
+- Machine and supervisor CSR substrate, exception return, delegated traps, timer interrupt path, external interrupt path, counters, `satp`, Sv32 page walking, small TLB, and `sfence.vma`.
 - Local boot/scratch memories and simple MMIO peripherals.
 - AXI DataMover control path for bulk DDR transfers through Zynq PS HP.
-- Direct single-word AXI4 master bridge for PL CPU load/store and instruction
-  fetches from PS DDR.
-- PS-side bring-up probe that loads ZX32 assembly/ELF tests, starts the PL CPU,
-  and reports PASS/FAIL over PS UART.
+- Direct single-word AXI4 master bridge for PL CPU load/store and instruction fetches from PS DDR.
+- PS-side bring-up probe that loads ZX32 assembly/ELF tests, starts the PL CPU, and reports PASS/FAIL over PS UART.
 
 Latest board-level bring-up has passed:
 
@@ -42,22 +32,29 @@ Latest board-level bring-up has passed:
 - custom DataMover instruction smoke
 - DDR random load/store smoke
 - DDR instruction fetch smoke
+- DDR high-address random load/store, instruction fetch, and AMO smoke
 - SBI firmware smoke
 - SBI timer smoke
+- Linux boot contract smoke
+- Linux SBI compatibility smoke
+- Linux image layout smoke
+- Linux boot to initramfs userspace:
+  - `SBI specification v0.2 detected`
+  - `SBI v0.2 TIME extension detected`
+  - `Run /init as init process`
+  - `[zx32-init] userspace entered`
+  - `[zx32-init] getpid ok`
+  - `[zx32-init] idle`
+  - `Boot monitor: userspace idle reached`
 
-New Linux bring-up scaffolding has been added but still needs board UART
-confirmation:
+The current Linux path is intentionally minimal:
 
-- Linux boot contract smoke: S-mode observes `a0=hartid`, `a1=dtb`, reads a
-  DTB-like magic word from DDR, calls SBI base/timer, and receives a delegated
-  S-mode timer interrupt.
-- `docs/linux_boot_layout.md` and `linux/zynq_cpu.dts` define the first boot layout
-  and DTB draft.
+- the initramfs is embedded in the kernel Image from `linux/initramfs/init.S`;
+- console output is mirrored through an SBI console scratch ring and drained by the PS launcher;
+- the local M-mode firmware implements only the SBI pieces needed by this kernel smoke path;
+- no BusyBox shell, libc userspace, block/network device stack, or production device drivers are present yet.
 
-Important gap: this is not ready to boot Linux until the Linux contract smoke is
-board-confirmed and the real firmware/kernel loading path, device tree,
-Linux-visible timer/interrupt/console model, and wider MMU/platform validation
-are completed.
+The next Linux work is to grow this from a board-proven smoke environment into a repeatable small userspace with cleaner SBI/platform contracts.
 
 ## Target Board
 
@@ -101,8 +98,7 @@ Run only one Icarus target:
 ./scripts/run_iverilog_tests.sh soc
 ```
 
-Build the PS UART probe ELF. This also regenerates the ZX32 program header from
-`hw_bringup/programs/*.zx32.s`:
+Build the PS UART probe ELF. This also regenerates the ZX32 program header from `hw_bringup/programs/*.zx32.s`:
 
 ```sh
 ./scripts/build_ps_uart_probe.sh
@@ -132,18 +128,27 @@ Download the bitstream and run the PS bring-up probe:
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_bringup.xsbl
 ```
 
+Prepare and run the current Linux boot path:
+
+```sh
+./scripts/prepare_mainline_linux.sh
+./scripts/build_mainline_rv32_linux.sh
+./scripts/prepare_linux_boot_artifacts.sh
+./scripts/build_ps_uart_probe.sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
+```
+
 ## Script Rules
 
-Vivado, Vitis, and XSCT commands must use the repository wrappers so the local
-Vivado 2025.2 environment is loaded consistently:
+Vivado, Vitis, and XSCT commands must use the repository wrappers so the local Vivado 2025.2 environment is loaded consistently:
 
 - `scripts/run_vivado.sh`
 - `scripts/run_xsct.sh`
 - `scripts/build_ps_uart_probe.sh`
 
-The wrappers source `/home/orionisli/.zshrc`, call `vi25`, then run the relevant
-tool. Do not rely on an already-configured interactive shell when adding project
-automation.
+The wrappers source `/home/orionisli/.zshrc`, call `vi25`, then run the relevant tool. 
+
+Do not rely on an already-configured interactive shell when adding project automation.
 
 ## Documentation Index
 
@@ -154,7 +159,7 @@ automation.
 - `docs/isa.md`: supported ISA subset, custom instructions, and toolchain notes
 - `docs/toolchain.md`: local tools and command entry points
 - `docs/synthesis_status.md`: current synthesis/implementation snapshots
-- `docs/roadmap.md`: Linux readiness plan and remaining work
-- `docs/linux_bringup.md`: Linux bring-up contract and next payload milestones
-- `docs/linux_boot_layout.md`: DDR placement for firmware/kernel/DTB/initramfs
+- `docs/roadmap.md`: completed Linux milestone and remaining platform work
+- `docs/linux_bringup.md`: current Linux boot flow, evidence, and limitations
+- `docs/linux_boot_layout.md`: actual firmware/kernel/DTB/initramfs placement
 - `linux/zynq_cpu.dts`: first DTB source draft for the current custom platform

@@ -16,9 +16,7 @@ PS UART / XSCT
        -> AXI4 master bridge for direct PS DDR load/store/fetch
 ```
 
-The PS side still owns bootstrapping: PS initializes DDR, configures the PL,
-loads the ARM-side probe, writes PL CPU test programs, and releases the PL CPU
-from reset.
+The PS side still owns bootstrapping: PS initializes DDR, configures the PL, loads the ARM-side probe, writes PL CPU test programs, and releases the PL CPU from reset.
 
 ## Core
 
@@ -28,8 +26,7 @@ The core is a multi-cycle in-order RV32 design. It is intentionally simple:
   writeback-style states
 - no instruction or data cache
 - no pipeline hazards to manage yet
-- memory requests are held until the selected local, MMIO, or DDR target is
-  ready
+- memory requests are held until the selected local, MMIO, or DDR target is ready
 
 Implemented execution substrate:
 
@@ -64,9 +61,7 @@ The DDR window is translated by `rtl/bus/axi4_master_bridge.sv`:
 PL CPU 0x8000_0000 -> PS physical 0x0010_0000
 ```
 
-The bridge currently issues single-beat 32-bit AXI4 reads and writes. It is good
-enough for smoke tests and early firmware, but not a cache or high-performance
-memory system.
+The bridge currently issues single-beat 32-bit AXI4 reads and writes. It is good enough for smoke tests and early firmware, but not a cache or high-performance memory system.
 
 ## PS-Side AXI Register Windows
 
@@ -105,23 +100,33 @@ The detailed PS-side constants live in `hw_bringup/ps_uart_probe.h`.
 | `0x0c` | claim/complete |
 | `0x10` | raw source bits |
 
-This is enough for the current S-mode timer and external interrupt smoke tests.
-A Linux-targeted platform still needs a stable device-tree contract and either a
-driver-compatible device model or firmware that hides these details behind SBI.
+This is enough for the current S-mode timer smokes and the real Linux boot path. Linux timer events are currently handled through the local SBI shim: the kernel requests SBI TIME events in the CSR `time/timeh` domain, and firmware programs the MMIO `mtimecmp` register after applying the measured `mtime - rdtime` offset.
 
-## Linux Readiness
+## Linux Status
 
-The current architecture has many of the CPU-side pieces Linux needs, but the
-platform contract is still incomplete. Before attempting a real Linux boot, the
-project needs:
+The architecture now boots a mainline RV32 Linux kernel to a tiny embedded initramfs userspace on the board. The board-proven path is:
 
-- a loader path for kernel image, DTB, and initramfs in DDR
-- an M-mode firmware layer or minimal OpenSBI-compatible shim beyond the current
-  smoke-test firmware
-- final hart entry convention: `a0=hartid`, `a1=dtb`, now covered by the Linux
-  contract smoke test
-- a DTB that describes the actual UART/timer/interrupt/memory map; the first
-  draft is `linux/zynq_cpu.dts`
-- validation of Sv32 against real Linux page-table behavior
-- a decision on cache/uncached memory behavior and memory ordering
-- enough UART/console support for early kernel logs
+```text
+PS launcher
+  -> Linux Image at CPU 0x8040_0000 / PS 0x0050_0000
+  -> DTB at CPU 0x8160_0000 / PS 0x0170_0000
+  -> M-mode SBI firmware in IMEM
+  -> Linux S-mode entry with a0=0, a1=0x8160_0000, satp=0
+  -> /init from built-in initramfs
+```
+
+Current Linux-visible behavior:
+
+- early console and `hvc0` use SBI console calls mirrored through the PS-visible scratch ring
+- timer events use SBI TIME and the local MMIO timer
+- Sv32 page walking and the TLB are sufficient for kernel init and the tiny userspace smoke
+- the direct DDR bridge provides uncached single-beat instruction/data access
+- no Linux drivers exist yet for the custom PL UART, timer, IRQ controller, or DataMover blocks
+
+Remaining architecture work is mostly about turning the bring-up contract into a stable platform ABI:
+
+- decide whether to keep the local SBI shim or move toward OpenSBI
+- clean up or formalize the current `rdtime` to `mtime` offset bridge
+- expand MMU, interrupt, AMO, and memory-ordering tests around Linux behavior
+- decide which custom devices should be visible to Linux
+- document cache/uncached memory ordering before performance work
