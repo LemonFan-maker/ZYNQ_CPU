@@ -181,10 +181,10 @@ int run_cpu_ddr_access_smoke_test(void)
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 0U);
 
     if (wait_for_cpu(&status) != 0) {
-        u32 diag_test   = Xil_In32(CPU_MAIL_START);
+        u32 diag_test = Xil_In32(CPU_MAIL_START);
         u32 diag_expect = Xil_In32(CPU_MAIL_SRC);
         u32 diag_actual = Xil_In32(CPU_MAIL_DST);
-        u32 diag_addr   = Xil_In32(CPU_MAIL_LEN);
+        u32 diag_addr = Xil_In32(CPU_MAIL_LEN);
         xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
         xil_printf("Diag test#: %u\r\n", (unsigned int)diag_test);
         xil_printf("Diag expect: 0x%08x\r\n", (unsigned int)diag_expect);
@@ -402,6 +402,261 @@ int run_cpu_ddr_exec_smoke_test(void)
         marker != 0xA5A55A5AU ||
         loop_count != 16U ||
         status != CPU_STATUS_PASS) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int run_cpu_ddr_high_access_smoke_test(void)
+{
+    u32 status = 0U;
+    u32 verify_errors = 0U;
+    u32 ctrl_status;
+    u32 bram_words;
+    u32 scratch_words;
+    u32 loaded_words = 0U;
+    u32 entry = 0U;
+    u32 ps_probe0;
+    u32 ps_probe1;
+    u32 ps_probe16;
+    int rc;
+
+    for (u32 i = 0U; i < 32U; i++) {
+        Xil_Out32(ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR + i * 4U, 0U);
+    }
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
+    ctrl_status = Xil_In32(ZYNQ_CPU_CPU_STATUS);
+    bram_words = Xil_In32(ZYNQ_CPU_BRAM_WORDS);
+    scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
+
+    Xil_Out32(CPU_MAIL_START, 0U);
+    Xil_Out32(CPU_MAIL_SRC, ZYNQ_CPU_DDR_HIGH_DATA_CPU_ADDR);
+    Xil_Out32(CPU_MAIL_DST, 0U);
+    Xil_Out32(CPU_MAIL_LEN, 0U);
+    Xil_Out32(CPU_MAIL_STATUS, 0U);
+
+    rc = load_zx32_elf_into_imem(zx32_ddr_access_smoke_elf, zx32_ddr_access_smoke_elf_size, &loaded_words, &entry);
+    if (rc != 0) {
+        xil_printf("High DDR access ELF rc: %d\r\n", rc);
+        return -1;
+    }
+    Xil_Out32(ZYNQ_CPU_RESET_VECTOR, entry);
+
+    for (u32 i = 0U; i < (sizeof(zx32_ddr_access_smoke_program) / sizeof(zx32_ddr_access_smoke_program[0])); i++) {
+        if (Xil_In32(ZYNQ_CPU_IMEM_BASE + i * 4U) != zx32_ddr_access_smoke_program[i]) {
+            verify_errors++;
+        }
+    }
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 0U);
+
+    if (wait_for_cpu(&status) != 0) {
+        u32 diag_test = Xil_In32(CPU_MAIL_START);
+        u32 diag_expect = Xil_In32(CPU_MAIL_SRC);
+        u32 diag_actual = Xil_In32(CPU_MAIL_DST);
+        u32 diag_addr = Xil_In32(CPU_MAIL_LEN);
+        xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+        xil_printf("Diag test#: %u\r\n", (unsigned int)diag_test);
+        xil_printf("Diag expect: 0x%08x\r\n", (unsigned int)diag_expect);
+        xil_printf("Diag actual: 0x%08x\r\n", (unsigned int)diag_actual);
+        xil_printf("Diag address: 0x%08x\r\n", (unsigned int)diag_addr);
+        xil_printf("Probe PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR);
+        xil_printf("Probe CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_DATA_CPU_ADDR);
+        return -1;
+    }
+
+    ps_probe0 = Xil_In32(ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR);
+    ps_probe1 = Xil_In32(ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR + 4U);
+    ps_probe16 = Xil_In32(ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR + 16U * 4U);
+
+    xil_printf("CPU ctrl st: 0x%08x\r\n", (unsigned int)ctrl_status);
+    xil_printf("CPU BRAM: %u words\r\n", (unsigned int)bram_words);
+    xil_printf("CPU scratch: %u words\r\n", (unsigned int)scratch_words);
+    xil_printf("ELF words: %u\r\n", (unsigned int)loaded_words);
+    xil_printf("Entry PC: 0x%08x\r\n", (unsigned int)entry);
+    xil_printf("IMEM verify: %u errors\r\n", (unsigned int)verify_errors);
+    xil_printf("Probe PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_DATA_PS_ADDR);
+    xil_printf("Probe CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_DATA_CPU_ADDR);
+    xil_printf("Probe [0]: 0x%08x\r\n", (unsigned int)ps_probe0);
+    xil_printf("Probe [1]: 0x%08x\r\n", (unsigned int)ps_probe1);
+    xil_printf("Probe [16]: 0x%08x\r\n", (unsigned int)ps_probe16);
+    xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+
+    if (verify_errors != 0U ||
+        status != CPU_STATUS_PASS ||
+        ps_probe0 != 0xDEADBEEFU ||
+        ps_probe1 != 0xCAFEBABEU ||
+        ps_probe16 != 0x13579BDFU) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int run_cpu_ddr_high_exec_smoke_test(void)
+{
+    u32 status = 0U;
+    u32 ctrl_status;
+    u32 bram_words;
+    u32 scratch_words;
+    u32 observed_pc;
+    u32 marker;
+    u32 loop_count;
+    u32 ps_first;
+    u32 ps_last;
+    u32 program_words = sizeof(zx32_ddr_exec_smoke_program) / sizeof(zx32_ddr_exec_smoke_program[0]);
+
+    for (u32 i = 0U; i < program_words; i++) {
+        Xil_Out32(ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR + i * 4U, zx32_ddr_exec_smoke_program[i]);
+    }
+    for (u32 i = program_words; i < CPU_DDR_EXEC_WORDS; i++) {
+        Xil_Out32(ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR + i * 4U, 0U);
+    }
+
+    ps_first = Xil_In32(ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR);
+    ps_last = Xil_In32(ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR + (program_words - 1U) * 4U);
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
+    ctrl_status = Xil_In32(ZYNQ_CPU_CPU_STATUS);
+    bram_words = Xil_In32(ZYNQ_CPU_BRAM_WORDS);
+    scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
+
+    Xil_Out32(CPU_DDR_EXEC_PC, 0U);
+    Xil_Out32(CPU_DDR_EXEC_MARKER, 0U);
+    Xil_Out32(CPU_DDR_EXEC_COUNT, 0U);
+    Xil_Out32(CPU_MAIL_STATUS, 0U);
+    Xil_Out32(ZYNQ_CPU_RESET_VECTOR, ZYNQ_CPU_DDR_HIGH_EXEC_CPU_ADDR);
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 0U);
+
+    if (wait_for_cpu(&status) != 0) {
+        xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+        xil_printf("Exec PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR);
+        xil_printf("Exec CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_EXEC_CPU_ADDR);
+        xil_printf("PS first: 0x%08x\r\n", (unsigned int)ps_first);
+        xil_printf("PS last: 0x%08x\r\n", (unsigned int)ps_last);
+        return -1;
+    }
+
+    observed_pc = Xil_In32(CPU_DDR_EXEC_PC);
+    marker = Xil_In32(CPU_DDR_EXEC_MARKER);
+    loop_count = Xil_In32(CPU_DDR_EXEC_COUNT);
+
+    xil_printf("CPU ctrl st: 0x%08x\r\n", (unsigned int)ctrl_status);
+    xil_printf("CPU BRAM: %u words\r\n", (unsigned int)bram_words);
+    xil_printf("CPU scratch: %u words\r\n", (unsigned int)scratch_words);
+    xil_printf("Exec words: %u\r\n", (unsigned int)program_words);
+    xil_printf("Exec PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_EXEC_PS_ADDR);
+    xil_printf("Exec CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_EXEC_CPU_ADDR);
+    xil_printf("PS first: 0x%08x\r\n", (unsigned int)ps_first);
+    xil_printf("PS last: 0x%08x\r\n", (unsigned int)ps_last);
+    xil_printf("Observed PC: 0x%08x\r\n", (unsigned int)observed_pc);
+    xil_printf("Marker: 0x%08x\r\n", (unsigned int)marker);
+    xil_printf("Loop count: %u\r\n", (unsigned int)loop_count);
+    xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+
+    if (observed_pc != ZYNQ_CPU_DDR_HIGH_EXEC_CPU_ADDR ||
+        marker != 0xA5A55A5AU ||
+        loop_count != 16U ||
+        status != CPU_STATUS_PASS) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int run_cpu_ddr_high_amo_smoke_test(void)
+{
+    u32 status = 0U;
+    u32 verify_errors = 0U;
+    u32 ctrl_status;
+    u32 bram_words;
+    u32 scratch_words;
+    u32 loaded_words = 0U;
+    u32 entry = 0U;
+    u32 ps_final;
+    u32 diag_step;
+    u32 diag_old;
+    u32 diag_final;
+    u32 diag_addr;
+    int rc;
+
+    Xil_Out32(ZYNQ_CPU_DDR_HIGH_AMO_PS_ADDR, 0xFFFFFFFFU);
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
+    ctrl_status = Xil_In32(ZYNQ_CPU_CPU_STATUS);
+    bram_words = Xil_In32(ZYNQ_CPU_BRAM_WORDS);
+    scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
+
+    Xil_Out32(CPU_MAIL_START, 0U);
+    Xil_Out32(CPU_MAIL_SRC, ZYNQ_CPU_DDR_HIGH_AMO_CPU_ADDR);
+    Xil_Out32(CPU_MAIL_DST, 0U);
+    Xil_Out32(CPU_MAIL_LEN, 0U);
+    Xil_Out32(CPU_MAIL_STATUS, 0U);
+
+    rc = load_zx32_elf_into_imem(zx32_ddr_high_amo_smoke_elf,
+                                 zx32_ddr_high_amo_smoke_elf_size,
+                                 &loaded_words,
+                                 &entry);
+    if (rc != 0) {
+        xil_printf("High DDR AMO ELF rc: %d\r\n", rc);
+        return -1;
+    }
+    Xil_Out32(ZYNQ_CPU_RESET_VECTOR, entry);
+
+    for (u32 i = 0U; i < (sizeof(zx32_ddr_high_amo_smoke_program) / sizeof(zx32_ddr_high_amo_smoke_program[0])); i++) {
+        if (Xil_In32(ZYNQ_CPU_IMEM_BASE + i * 4U) != zx32_ddr_high_amo_smoke_program[i]) {
+            verify_errors++;
+        }
+    }
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 0U);
+
+    if (wait_for_cpu(&status) != 0) {
+        diag_step = Xil_In32(CPU_MAIL_START);
+        diag_old = Xil_In32(CPU_MAIL_SRC);
+        diag_final = Xil_In32(CPU_MAIL_DST);
+        diag_addr = Xil_In32(CPU_MAIL_LEN);
+        ps_final = Xil_In32(ZYNQ_CPU_DDR_HIGH_AMO_PS_ADDR);
+        xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+        xil_printf("Diag step: %u\r\n", (unsigned int)diag_step);
+        xil_printf("Diag old: 0x%08x\r\n", (unsigned int)diag_old);
+        xil_printf("Diag final: 0x%08x\r\n", (unsigned int)diag_final);
+        xil_printf("Diag addr: 0x%08x\r\n", (unsigned int)diag_addr);
+        xil_printf("Probe PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_AMO_PS_ADDR);
+        xil_printf("Probe CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_AMO_CPU_ADDR);
+        xil_printf("PS final: 0x%08x\r\n", (unsigned int)ps_final);
+        return -1;
+    }
+
+    diag_step = Xil_In32(CPU_MAIL_START);
+    diag_old = Xil_In32(CPU_MAIL_SRC);
+    diag_final = Xil_In32(CPU_MAIL_DST);
+    diag_addr = Xil_In32(CPU_MAIL_LEN);
+    ps_final = Xil_In32(ZYNQ_CPU_DDR_HIGH_AMO_PS_ADDR);
+
+    xil_printf("CPU ctrl st: 0x%08x\r\n", (unsigned int)ctrl_status);
+    xil_printf("CPU BRAM: %u words\r\n", (unsigned int)bram_words);
+    xil_printf("CPU scratch: %u words\r\n", (unsigned int)scratch_words);
+    xil_printf("ELF words: %u\r\n", (unsigned int)loaded_words);
+    xil_printf("Entry PC: 0x%08x\r\n", (unsigned int)entry);
+    xil_printf("IMEM verify: %u errors\r\n", (unsigned int)verify_errors);
+    xil_printf("Probe PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_AMO_PS_ADDR);
+    xil_printf("Probe CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_DDR_HIGH_AMO_CPU_ADDR);
+    xil_printf("AMO old: 0x%08x\r\n", (unsigned int)diag_old);
+    xil_printf("AMO final: 0x%08x\r\n", (unsigned int)diag_final);
+    xil_printf("AMO addr: 0x%08x\r\n", (unsigned int)diag_addr);
+    xil_printf("PS final: 0x%08x\r\n", (unsigned int)ps_final);
+    xil_printf("CPU status: 0x%08x\r\n", (unsigned int)status);
+
+    if (verify_errors != 0U ||
+        status != CPU_STATUS_PASS ||
+        diag_step != 0U ||
+        diag_old != 1U ||
+        diag_final != 3U ||
+        diag_addr != ZYNQ_CPU_DDR_HIGH_AMO_CPU_ADDR ||
+        ps_final != 3U) {
         return -1;
     }
 
@@ -723,4 +978,3 @@ int run_cpu_supervisor_counter_smoke_test(void)
 
     return 0;
 }
-

@@ -116,9 +116,12 @@ platform contract is still incomplete. Before attempting a real Linux boot, the
 project needs:
 
 - a loader path for kernel image, DTB, and initramfs in DDR
-- an M-mode firmware layer or minimal OpenSBI-compatible shim
-- final hart entry convention: `a0=hartid`, `a1=dtb`
-- a DTB that describes the actual UART/timer/interrupt/memory map
+- an M-mode firmware layer or minimal OpenSBI-compatible shim beyond the current
+  smoke-test firmware
+- final hart entry convention: `a0=hartid`, `a1=dtb`, now covered by the Linux
+  contract smoke test
+- a DTB that describes the actual UART/timer/interrupt/memory map; the first
+  draft is `linux/zynq_cpu.dts`
 - validation of Sv32 against real Linux page-table behavior
 - a decision on cache/uncached memory behavior and memory ordering
 - enough UART/console support for early kernel logs

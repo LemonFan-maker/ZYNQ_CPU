@@ -18,7 +18,20 @@ module zx32_core (
     output logic [31:0] dmem_addr,
     output logic [31:0] dmem_wdata,
     input  logic        dmem_ready,
-    input  logic [31:0] dmem_rdata
+    input  logic [31:0] dmem_rdata,
+
+    output logic [31:0] dbg_core_state,
+    output logic [31:0] dbg_pc,
+    output logic [31:0] dbg_satp,
+    output logic [31:0] dbg_stvec,
+    output logic [31:0] dbg_sepc,
+    output logic [31:0] dbg_scause,
+    output logic [31:0] dbg_stval,
+    output logic [31:0] dbg_req_vaddr,
+    output logic [31:0] dbg_req_paddr,
+    output logic [31:0] dbg_ptw_pte_addr,
+    output logic [31:0] dbg_ptw_l1_pte,
+    output logic [31:0] dbg_ptw_l0_pte
 );
     localparam logic [31:0] DM_BASE            = 32'h1002_0000;
     localparam logic [31:0] DM_CTRL            = DM_BASE + 32'h0000;
@@ -651,6 +664,29 @@ module zx32_core (
                             (interrupt_cause == (MCAUSE_INTERRUPT | 32'd9));
     assign interrupt_to_m = (interrupt_cause == (MCAUSE_INTERRUPT | 32'd7)) ||
                             (interrupt_cause == (MCAUSE_INTERRUPT | 32'd11));
+    assign dbg_core_state = {16'd0,
+                             current_priv,
+                             state,
+                             dmem_ready,
+                             dmem_valid,
+                             imem_ready,
+                             imem_valid,
+                             page_fault_pending,
+                             req_we,
+                             req_is_fetch,
+                             req_pa_valid,
+                             req_active};
+    assign dbg_pc = pc;
+    assign dbg_satp = csr_satp;
+    assign dbg_stvec = csr_stvec;
+    assign dbg_sepc = csr_sepc;
+    assign dbg_scause = csr_scause;
+    assign dbg_stval = csr_stval;
+    assign dbg_req_vaddr = req_vaddr;
+    assign dbg_req_paddr = req_paddr;
+    assign dbg_ptw_pte_addr = ptw_pte_addr;
+    assign dbg_ptw_l1_pte = ptw_l1_pte;
+    assign dbg_ptw_l0_pte = ptw_l0_pte;
 
     always_comb begin
         tlb_lookup_hit = 1'b0;
@@ -667,7 +703,7 @@ module zx32_core (
                                            tlb_r[i], tlb_w[i], tlb_x[i], tlb_u[i], tlb_a[i], tlb_d[i])) begin
                         tlb_lookup_hit = 1'b1;
                         if (tlb_superpage[i]) begin
-                            tlb_lookup_paddr = {tlb_ppn[i][21:12], req_vaddr[21:0]};
+                            tlb_lookup_paddr = {tlb_ppn[i][19:10], req_vaddr[21:0]};
                         end else begin
                             tlb_lookup_paddr = {tlb_ppn[i], req_vaddr[11:0]};
                         end
@@ -1534,7 +1570,7 @@ module zx32_core (
                             req_pa_valid <= 1'b0;
                             state <= ST_WRITEBACK;
                         end else begin
-                            req_paddr <= {ptw_l1_pte[31:22], req_vaddr[21:0]};
+                            req_paddr <= {ptw_l1_pte[29:20], req_vaddr[21:0]};
                             req_pa_valid <= 1'b1;
                             if (!ptw_l1_pte[6] || (req_we && !ptw_l1_pte[7])) begin
                                 ptw_ad_pte <= sv32_pte_set_ad(ptw_l1_pte, req_we);

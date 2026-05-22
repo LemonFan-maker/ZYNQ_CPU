@@ -144,6 +144,30 @@ int main(void)
     }
 
     xil_printf("\r\n");
+    xil_printf("> PL CPU DDR high random access smoke\r\n");
+    if (run_cpu_ddr_high_access_smoke_test() == 0) {
+        xil_printf("ZYNQ_CPU DDR high access smoke: PASS\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU DDR high access smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
+    xil_printf("> PL CPU DDR high instruction fetch smoke\r\n");
+    if (run_cpu_ddr_high_exec_smoke_test() == 0) {
+        xil_printf("ZYNQ_CPU DDR high instruction fetch smoke: PASS\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU DDR high instruction fetch smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
+    xil_printf("> PL CPU DDR high AMO smoke\r\n");
+    if (run_cpu_ddr_high_amo_smoke_test() == 0) {
+        xil_printf("ZYNQ_CPU DDR high AMO smoke: PASS\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU DDR high AMO smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
     xil_printf("> PL CPU SBI firmware smoke\r\n");
     if (run_cpu_sbi_smoke_test() == 0) {
         xil_printf("ZYNQ_CPU SBI firmware smoke: PASS\r\n");
@@ -157,6 +181,33 @@ int main(void)
         xil_printf("ZYNQ_CPU SBI timer smoke: PASS\r\n");
     } else {
         xil_printf("ZYNQ_CPU SBI timer smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
+    xil_printf("> PL CPU Linux boot contract smoke\r\n");
+    if (run_cpu_linux_contract_smoke_test() == 0) {
+        xil_printf("ZYNQ_CPU Linux boot contract smoke: PASS\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU Linux boot contract smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
+    xil_printf("> PL CPU Linux SBI compatibility smoke\r\n");
+    if (run_cpu_linux_sbi_smoke_test() == 0) {
+        xil_printf("ZYNQ_CPU Linux SBI compatibility smoke: PASS\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU Linux SBI compatibility smoke: FAIL\r\n");
+    }
+
+    xil_printf("\r\n");
+    xil_printf("> PL CPU Linux image layout smoke\r\n");
+    int linux_image_rc = run_cpu_linux_image_layout_smoke_test();
+    if (linux_image_rc == 0) {
+        xil_printf("ZYNQ_CPU Linux image layout smoke: PASS\r\n");
+    } else if (linux_image_rc > 0) {
+        xil_printf("ZYNQ_CPU Linux image layout smoke: SKIP\r\n");
+    } else {
+        xil_printf("ZYNQ_CPU Linux image layout smoke: FAIL\r\n");
     }
 
     while (1) {

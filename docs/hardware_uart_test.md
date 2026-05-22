@@ -121,6 +121,15 @@ ZYNQ_CPU SBI firmware smoke: PASS
 ZYNQ_CPU SBI timer smoke: PASS
 ```
 
+The probe now also includes the first Linux-facing contract test. This section
+is compile-verified, but still needs a board UART run before it should be
+treated as board-proven:
+
+```text
+> PL CPU Linux boot contract smoke
+ZYNQ_CPU Linux boot contract smoke: PASS
+```
+
 ## What the Late-Stage Tests Prove
 
 - DDR random access smoke: PL CPU can load/store through the direct AXI DDR
@@ -131,6 +140,10 @@ ZYNQ_CPU SBI timer smoke: PASS
   S-mode SBI call.
 - SBI timer smoke: M-mode firmware can handle the SBI timer extension smoke path
   and return to S-mode after a timer interrupt.
+- Linux boot contract smoke, once board-confirmed: M-mode firmware enters an
+  S-mode payload with Linux-style `a0=hartid` and `a1=dtb`, the payload reads a
+  DTB-like magic word from DDR, calls SBI base/timer services, and observes a
+  delegated S-mode timer interrupt.
 
 These are necessary Linux stepping stones, but they do not yet prove that a real
 Linux kernel will boot.

@@ -37,6 +37,23 @@ turn board-proven smoke tests into a Linux boot substrate
 That means moving from tiny hand-written payloads to a real firmware/kernel
 loading path and a documented platform ABI.
 
+## Current Linux Bring-Up Scaffold
+
+The first Linux-facing files now live in `linux/`:
+
+- `docs/linux_bringup.md`
+- `docs/linux_boot_layout.md`
+- `linux/zynq_cpu.dts`
+
+The corresponding board smoke sources are:
+
+- `hw_bringup/programs/linux_contract_firmware_smoke.zx32.s`
+- `hw_bringup/programs/linux_contract_payload_smoke.zx32.s`
+- `run_cpu_linux_contract_smoke_test()` in `hw_bringup/ps_uart_probe_sbi.c`
+
+This scaffold is compile-verified and included in the PS UART probe. It still
+needs a board UART run before it moves into the completed milestone list.
+
 ## Next Milestone: Real Firmware Contract
 
 Goal: run an M-mode firmware layer that can enter a larger S-mode payload using
@@ -45,7 +62,8 @@ the same convention Linux expects.
 Required work:
 
 - decide whether to adapt OpenSBI or keep a small local SBI shim first
-- implement the required SBI base and timer behavior beyond smoke-test calls
+- implement the required SBI base and timer behavior beyond current smoke-test
+  calls
 - define hart ID and DTB address ownership
 - place firmware, payload, and DTB in DDR through the PS loader
 - make failures visible through UART/mailbox diagnostics

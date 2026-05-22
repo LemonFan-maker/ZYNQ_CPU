@@ -529,6 +529,86 @@ module tb_zx32_core;
             $fatal(1, "expected to remain in S-mode after superpage TLB smoke, priv=%0d", u_core.current_priv);
         end
 
+        u_ram.mem[0]  = 32'h0800_0293; // li     x5, 128
+        u_ram.mem[1]  = 32'h3052_9073; // csrw   mtvec, x5
+        u_ram.mem[2]  = 32'h0000_12b7; // lui    x5, 0x1
+        u_ram.mem[3]  = 32'h0002_8293; // addi   x5, x5, 0
+        u_ram.mem[4]  = 32'h3022_9073; // csrw   medeleg, x5
+        u_ram.mem[5]  = 32'h0000_32b7; // lui    x5, 0x3
+        u_ram.mem[6]  = 32'h0002_8293; // addi   x5, x5, 0
+        u_ram.mem[7]  = 32'h3412_9073; // csrw   mepc, x5
+        u_ram.mem[8]  = 32'h0000_12b7; // lui    x5, 0x1
+        u_ram.mem[9]  = 32'h8002_8293; // addi   x5, x5, -2048
+        u_ram.mem[10] = 32'h3002_9073; // csrw   mstatus, x5
+        u_ram.mem[11] = 32'h3020_0073; // mret
+        u_ram.mem[12] = 32'h0000_006f; // j      0
+        u_ram.mem[32] = 32'h3330_0293; // li     x5, 0x333
+        u_ram.mem[33] = 32'h2050_2823; // sw     x5, 528(x0)
+        u_ram.mem[34] = 32'h0000_006f; // j      0
+
+        u_ram.mem[SV32_CODE_IDX + 0]  = 32'hc000_32b7; // lui    x5, 0xc0003
+        u_ram.mem[SV32_CODE_IDX + 1]  = 32'h0402_8293; // addi   x5, x5, 0x40
+        u_ram.mem[SV32_CODE_IDX + 2]  = 32'h1052_9073; // csrw   stvec, x5
+        u_ram.mem[SV32_CODE_IDX + 3]  = 32'h8000_02b7; // lui    x5, 0x80000
+        u_ram.mem[SV32_CODE_IDX + 4]  = 32'h0012_8293; // addi   x5, x5, 1
+        u_ram.mem[SV32_CODE_IDX + 5]  = 32'h1802_9073; // csrw   satp, x5
+        u_ram.mem[SV32_CODE_IDX + 6]  = 32'h0000_1337; // lui    x6, 0x1
+        u_ram.mem[SV32_CODE_IDX + 7]  = 32'hbad3_0313; // addi   x6, x6, -1107
+        u_ram.mem[SV32_CODE_IDX + 8]  = 32'h2060_2023; // sw     x6, 512(x0)
+        u_ram.mem[SV32_CODE_IDX + 9]  = 32'h0000_006f; // j      0
+        u_ram.mem[SV32_CODE_IDX + 16] = 32'hc000_0eb7; // lui    x29, 0xc0000
+        u_ram.mem[SV32_CODE_IDX + 17] = 32'h000e_8e93; // addi   x29, x29, 0
+        u_ram.mem[SV32_CODE_IDX + 18] = 32'h05a0_0293; // li     x5, 0x5a
+        u_ram.mem[SV32_CODE_IDX + 19] = 32'h205e_a023; // sw     x5, 512(x29)
+        u_ram.mem[SV32_CODE_IDX + 20] = 32'h1410_2373; // csrr   x6, sepc
+        u_ram.mem[SV32_CODE_IDX + 21] = 32'h206e_a223; // sw     x6, 516(x29)
+        u_ram.mem[SV32_CODE_IDX + 22] = 32'h1420_23f3; // csrr   x7, scause
+        u_ram.mem[SV32_CODE_IDX + 23] = 32'h207e_a423; // sw     x7, 520(x29)
+        u_ram.mem[SV32_CODE_IDX + 24] = 32'h1430_2e73; // csrr   x28, stval
+        u_ram.mem[SV32_CODE_IDX + 25] = 32'h21ce_a623; // sw     x28, 524(x29)
+        u_ram.mem[SV32_CODE_IDX + 26] = 32'h0000_006f; // j      0
+
+        u_ram.mem[SV32_ROOT_IDX + 0] = 32'h0000_0000;
+        u_ram.mem[SV32_ROOT_IDX + 768] = 32'h0000_00cf;
+        u_ram.mem[128] = 32'h0000_0000;
+        u_ram.mem[129] = 32'h0000_0000;
+        u_ram.mem[130] = 32'h0000_0000;
+        u_ram.mem[131] = 32'h0000_0000;
+        u_ram.mem[132] = 32'h0000_0000;
+
+        reset_vector = 32'd0;
+        irq_timer = 1'b0;
+        irq_external = 1'b0;
+        rst_n = 1'b0;
+        repeat (4) @(posedge clk);
+        rst_n = 1'b1;
+
+        repeat (420) @(posedge clk);
+
+        if (u_ram.mem[128] !== 32'h0000_005a) begin
+            $fatal(1, "expected Linux-style Sv32 trampoline marker mem[128] = 0000005a, got %08x pc=%08x priv=%0d satp=%08x stvec=%08x sepc=%08x scause=%08x stval=%08x state=%0d req=%0d pa=%0d pte=%08x l1=%08x",
+                   u_ram.mem[128], u_core.pc, u_core.current_priv, u_core.csr_satp,
+                   u_core.csr_stvec, u_core.csr_sepc, u_core.csr_scause, u_core.csr_stval,
+                   u_core.state, u_core.req_active, u_core.req_pa_valid, u_core.ptw_pte_addr,
+                   u_core.ptw_l1_pte);
+        end
+        if (u_ram.mem[129] !== 32'h0000_3018) begin
+            $fatal(1, "expected Linux-style Sv32 trampoline sepc mem[129] = 00003018, got %08x",
+                   u_ram.mem[129]);
+        end
+        if (u_ram.mem[130] !== 32'h0000_000c) begin
+            $fatal(1, "expected Linux-style Sv32 trampoline scause mem[130] = 0000000c, got %08x",
+                   u_ram.mem[130]);
+        end
+        if (u_ram.mem[131] !== 32'h0000_3018) begin
+            $fatal(1, "expected Linux-style Sv32 trampoline stval mem[131] = 00003018, got %08x",
+                   u_ram.mem[131]);
+        end
+        if (u_core.current_priv !== 2'b01) begin
+            $fatal(1, "expected to remain in S-mode after Linux-style Sv32 trampoline smoke, priv=%0d",
+                   u_core.current_priv);
+        end
+
         u_ram.mem[0]  = 32'h0400_0093; // addi x1, x0, 64
         u_ram.mem[1]  = 32'h0010_0313; // addi x6, x0, 1
         u_ram.mem[2]  = 32'h0020_0513; // addi x10, x0, 2

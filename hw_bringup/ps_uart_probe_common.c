@@ -9,6 +9,7 @@ u32 cpu_dma_dst[DMA_WORDS] __attribute__((aligned(64)));
 u32 cpu_ddr_probe[32] __attribute__((aligned(64)));
 u32 cpu_ddr_exec[CPU_DDR_EXEC_WORDS] __attribute__((aligned(64)));
 u32 cpu_sbi_payload[CPU_SBI_PAYLOAD_WORDS] __attribute__((aligned(64)));
+u32 cpu_linux_contract[CPU_LINUX_CONTRACT_WORDS] __attribute__((aligned(64)));
 
 static u16 read_u16_le(const u8 *ptr)
 {
@@ -142,4 +143,3 @@ int wait_for_cpu(u32 *status_out)
     *status_out = status;
     return -2;
 }
-

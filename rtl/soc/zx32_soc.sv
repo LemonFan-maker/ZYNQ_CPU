@@ -156,6 +156,24 @@ module zx32_soc #(
     logic        cpu_reset_req;
     logic [31:0] cpu_reset_vector;
     logic        core_rst_n;
+    logic [31:0] dbg_core_state;
+    logic [31:0] dbg_pc;
+    logic [31:0] dbg_satp;
+    logic [31:0] dbg_stvec;
+    logic [31:0] dbg_sepc;
+    logic [31:0] dbg_scause;
+    logic [31:0] dbg_stval;
+    logic [31:0] dbg_req_vaddr;
+    logic [31:0] dbg_req_paddr;
+    logic [31:0] dbg_ptw_pte_addr;
+    logic [31:0] dbg_ptw_l1_pte;
+    logic [31:0] dbg_ptw_l0_pte;
+    logic [31:0] dbg_bus_state;
+    logic [31:0] dbg_last_ddr_addr;
+    logic [31:0] dbg_last_ddr_state;
+    logic [31:0] dbg_last_imem_addr;
+    logic [31:0] dbg_last_dmem_addr;
+    logic [31:0] dbg_last_axi_araddr;
 
     assign bus_valid = host_valid || dmem_valid;
     assign bus_we = host_valid ? host_we : dmem_we;
@@ -190,15 +208,49 @@ module zx32_soc #(
     assign host_rdata = bus_rdata;
     assign ctrl_ready = ctrl_valid;
     assign core_rst_n = rst_n && !cpu_reset_req;
+    assign dbg_bus_state = {20'd0,
+                            ddr_req_valid,
+                            ddr_req_we,
+                            ddr_ready,
+                            ddr_valid,
+                            imem_ddr_selected,
+                            bus_valid,
+                            bus_ready,
+                            host_valid,
+                            dmem_valid,
+                            dmem_ready,
+                            imem_valid,
+                            imem_ready};
 
     always_comb begin
         ctrl_rdata = 32'd0;
-        case (bus_addr[5:2])
-            4'h0: ctrl_rdata = {31'd0, cpu_reset_req};
-            4'h1: ctrl_rdata = {31'd0, cpu_reset_req};
-            4'h2: ctrl_rdata = BRAM_WORDS;
-            4'h3: ctrl_rdata = SCRATCH_WORDS;
-            4'h4: ctrl_rdata = cpu_reset_vector;
+        case (bus_addr[7:2])
+            6'h00: ctrl_rdata = {31'd0, cpu_reset_req};
+            6'h01: ctrl_rdata = {31'd0, cpu_reset_req};
+            6'h02: ctrl_rdata = BRAM_WORDS;
+            6'h03: ctrl_rdata = SCRATCH_WORDS;
+            6'h04: ctrl_rdata = cpu_reset_vector;
+            6'h08: ctrl_rdata = dbg_core_state;
+            6'h09: ctrl_rdata = dbg_pc;
+            6'h0a: ctrl_rdata = dbg_satp;
+            6'h0b: ctrl_rdata = dbg_stvec;
+            6'h0c: ctrl_rdata = dbg_sepc;
+            6'h0d: ctrl_rdata = dbg_scause;
+            6'h0e: ctrl_rdata = dbg_stval;
+            6'h0f: ctrl_rdata = dbg_req_vaddr;
+            6'h10: ctrl_rdata = dbg_req_paddr;
+            6'h11: ctrl_rdata = dbg_ptw_pte_addr;
+            6'h12: ctrl_rdata = dbg_ptw_l1_pte;
+            6'h13: ctrl_rdata = dbg_ptw_l0_pte;
+            6'h14: ctrl_rdata = dbg_bus_state;
+            6'h15: ctrl_rdata = ddr_req_addr;
+            6'h16: ctrl_rdata = imem_addr;
+            6'h17: ctrl_rdata = dmem_addr;
+            6'h18: ctrl_rdata = dbg_last_ddr_addr;
+            6'h19: ctrl_rdata = dbg_last_ddr_state;
+            6'h1a: ctrl_rdata = dbg_last_axi_araddr;
+            6'h1b: ctrl_rdata = dbg_last_imem_addr;
+            6'h1c: ctrl_rdata = dbg_last_dmem_addr;
             default: ctrl_rdata = 32'd0;
         endcase
     end
@@ -207,6 +259,11 @@ module zx32_soc #(
         if (!rst_n) begin
             cpu_reset_req <= 1'b0;
             cpu_reset_vector <= 32'd0;
+            dbg_last_ddr_addr <= 32'd0;
+            dbg_last_ddr_state <= 32'd0;
+            dbg_last_imem_addr <= 32'd0;
+            dbg_last_dmem_addr <= 32'd0;
+            dbg_last_axi_araddr <= 32'd0;
         end else if (ctrl_valid && bus_we) begin
             if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
                 cpu_reset_req <= bus_wdata[0];
@@ -217,6 +274,14 @@ module zx32_soc #(
                         cpu_reset_vector[i * 8 +: 8] <= bus_wdata[i * 8 +: 8];
                     end
                 end
+            end
+        end else begin
+            if (ddr_req_valid && !host_valid) begin
+                dbg_last_ddr_addr <= ddr_req_addr;
+                dbg_last_ddr_state <= dbg_bus_state;
+                dbg_last_imem_addr <= imem_addr;
+                dbg_last_dmem_addr <= dmem_addr;
+                dbg_last_axi_araddr <= M_AXI_DDR_ARADDR;
             end
         end
     end
@@ -268,7 +333,19 @@ module zx32_soc #(
         .dmem_addr(dmem_addr),
         .dmem_wdata(dmem_wdata),
         .dmem_ready(dmem_ready),
-        .dmem_rdata(dmem_rdata)
+        .dmem_rdata(dmem_rdata),
+        .dbg_core_state(dbg_core_state),
+        .dbg_pc(dbg_pc),
+        .dbg_satp(dbg_satp),
+        .dbg_stvec(dbg_stvec),
+        .dbg_sepc(dbg_sepc),
+        .dbg_scause(dbg_scause),
+        .dbg_stval(dbg_stval),
+        .dbg_req_vaddr(dbg_req_vaddr),
+        .dbg_req_paddr(dbg_req_paddr),
+        .dbg_ptw_pte_addr(dbg_ptw_pte_addr),
+        .dbg_ptw_l1_pte(dbg_ptw_l1_pte),
+        .dbg_ptw_l0_pte(dbg_ptw_l0_pte)
     );
 
     simple_ram #(.WORDS(BRAM_WORDS)) u_bram (

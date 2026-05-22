@@ -45,9 +45,19 @@ Latest board-level bring-up has passed:
 - SBI firmware smoke
 - SBI timer smoke
 
-Important gap: this is not ready to boot Linux until the boot contract, real
-firmware/kernel loading, device tree, Linux-visible timer/interrupt/console
-model, and wider MMU/platform validation are completed.
+New Linux bring-up scaffolding has been added but still needs board UART
+confirmation:
+
+- Linux boot contract smoke: S-mode observes `a0=hartid`, `a1=dtb`, reads a
+  DTB-like magic word from DDR, calls SBI base/timer, and receives a delegated
+  S-mode timer interrupt.
+- `docs/linux_boot_layout.md` and `linux/zynq_cpu.dts` define the first boot layout
+  and DTB draft.
+
+Important gap: this is not ready to boot Linux until the Linux contract smoke is
+board-confirmed and the real firmware/kernel loading path, device tree,
+Linux-visible timer/interrupt/console model, and wider MMU/platform validation
+are completed.
 
 ## Target Board
 
@@ -68,6 +78,8 @@ model, and wider MMU/platform validation are completed.
 | `tb/` | Icarus Verilog/SystemVerilog testbenches |
 | `tools/` | ZX32 assembler, ELF packer, and unit tests |
 | `hw_bringup/` | PS UART probe and PL CPU assembly smoke programs |
+| `linux/` | Linux DTS, config fragment, and initramfs sources |
+| `docs/linux_*.md` | Linux boot layout and bring-up contract notes |
 | `vivado/` | Vivado batch scripts for synthesis and hardware bring-up |
 | `scripts/` | Project automation entry points |
 | `docs/` | Development notes, current status, and roadmap |
@@ -143,3 +155,6 @@ automation.
 - `docs/toolchain.md`: local tools and command entry points
 - `docs/synthesis_status.md`: current synthesis/implementation snapshots
 - `docs/roadmap.md`: Linux readiness plan and remaining work
+- `docs/linux_bringup.md`: Linux bring-up contract and next payload milestones
+- `docs/linux_boot_layout.md`: DDR placement for firmware/kernel/DTB/initramfs
+- `linux/zynq_cpu.dts`: first DTB source draft for the current custom platform

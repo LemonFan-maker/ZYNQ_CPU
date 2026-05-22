@@ -23,3 +23,6 @@ hw_bringup/build/
 
 # Local scratch / tool state
 NA/
+linux/kernel/
+linux-mainline/
+linux-stable/

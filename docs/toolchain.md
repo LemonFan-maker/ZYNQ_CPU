@@ -122,3 +122,15 @@ Common generated outputs:
 - `build/vivado_synth/`
 
 These are build artifacts, not source-of-truth files.
+
+## Linux Bring-Up Files
+
+The first Linux-facing source files are:
+
+- `docs/linux_bringup.md`
+- `docs/linux_boot_layout.md`
+- `linux/zynq_cpu.dts`
+
+They are not generated artifacts. Keep them version-controlled and update them
+whenever the boot address layout, DTB contract, timer model, or interrupt model
+changes.

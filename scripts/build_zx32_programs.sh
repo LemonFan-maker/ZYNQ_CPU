@@ -22,10 +22,17 @@ python3 "$elf" "$repo_dir/hw_bringup/programs/boot_payload_smoke.zx32.s" -o "$bu
 python3 "$elf" "$repo_dir/hw_bringup/programs/supervisor_counter_smoke.zx32.s" -o "$build_dir/elf/supervisor_counter_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/ddr_access_smoke.zx32.s" -o "$build_dir/elf/ddr_access_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/ddr_exec_smoke.zx32.s" -o "$build_dir/elf/ddr_exec_smoke.elf" --load-addr 0x80000000
+python3 "$elf" "$repo_dir/hw_bringup/programs/ddr_high_amo_smoke.zx32.s" -o "$build_dir/elf/ddr_high_amo_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/sbi_firmware_smoke.zx32.s" -o "$build_dir/elf/sbi_firmware_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/sbi_payload_smoke.zx32.s" -o "$build_dir/elf/sbi_payload_smoke.elf" --load-addr 0x80000000
 python3 "$elf" "$repo_dir/hw_bringup/programs/sbi_timer_firmware_smoke.zx32.s" -o "$build_dir/elf/sbi_timer_firmware_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/sbi_timer_payload_smoke.zx32.s" -o "$build_dir/elf/sbi_timer_payload_smoke.elf" --load-addr 0x80000000
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_contract_firmware_smoke.zx32.s" -o "$build_dir/elf/linux_contract_firmware_smoke.elf" --load-addr 0x0
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_contract_payload_smoke.zx32.s" -o "$build_dir/elf/linux_contract_payload_smoke.elf" --load-addr 0x80000000
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_image_layout_smoke.zx32.s" -o "$build_dir/elf/linux_image_layout_smoke.elf" --load-addr 0x0
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_sbi_firmware_smoke.zx32.s" -o "$build_dir/elf/linux_sbi_firmware_smoke.elf" --load-addr 0x0
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_sbi_payload_smoke.zx32.s" -o "$build_dir/elf/linux_sbi_payload_smoke.elf" --load-addr 0x80000000
+python3 "$elf" "$repo_dir/hw_bringup/programs/linux_boot_firmware.zx32.s" -o "$build_dir/elf/linux_boot_firmware.elf" --load-addr 0x0
 
 tmp_header="$(mktemp "$gen_dir/zx32_programs.XXXXXX")"
 trap 'rm -f "$tmp_header"' EXIT
@@ -56,6 +63,8 @@ trap 'rm -f "$tmp_header"' EXIT
   printf '\n'
   python3 "$asm" "$repo_dir/hw_bringup/programs/ddr_exec_smoke.zx32.s" --format c --c-type u32 --array-name zx32_ddr_exec_smoke_program
   printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/ddr_high_amo_smoke.zx32.s" --format c --c-type u32 --array-name zx32_ddr_high_amo_smoke_program
+  printf '\n'
   python3 "$asm" "$repo_dir/hw_bringup/programs/sbi_firmware_smoke.zx32.s" --format c --c-type u32 --array-name zx32_sbi_firmware_smoke_program
   printf '\n'
   python3 "$asm" "$repo_dir/hw_bringup/programs/sbi_payload_smoke.zx32.s" --format c --c-type u32 --array-name zx32_sbi_payload_smoke_program
@@ -63,6 +72,18 @@ trap 'rm -f "$tmp_header"' EXIT
   python3 "$asm" "$repo_dir/hw_bringup/programs/sbi_timer_firmware_smoke.zx32.s" --format c --c-type u32 --array-name zx32_sbi_timer_firmware_smoke_program
   printf '\n'
   python3 "$asm" "$repo_dir/hw_bringup/programs/sbi_timer_payload_smoke.zx32.s" --format c --c-type u32 --array-name zx32_sbi_timer_payload_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_contract_firmware_smoke.zx32.s" --format c --c-type u32 --array-name zx32_linux_contract_firmware_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_contract_payload_smoke.zx32.s" --format c --c-type u32 --array-name zx32_linux_contract_payload_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_image_layout_smoke.zx32.s" --format c --c-type u32 --array-name zx32_linux_image_layout_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_sbi_firmware_smoke.zx32.s" --format c --c-type u32 --array-name zx32_linux_sbi_firmware_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_sbi_payload_smoke.zx32.s" --format c --c-type u32 --array-name zx32_linux_sbi_payload_smoke_program
+  printf '\n'
+  python3 "$asm" "$repo_dir/hw_bringup/programs/linux_boot_firmware.zx32.s" --format c --c-type u32 --array-name zx32_linux_boot_firmware_program
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/ps_bram_load.elf" --array-name zx32_ps_bram_load_elf
   printf '\n'
@@ -86,6 +107,8 @@ trap 'rm -f "$tmp_header"' EXIT
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/ddr_exec_smoke.elf" --array-name zx32_ddr_exec_smoke_elf
   printf '\n'
+  python3 "$bin2c" "$build_dir/elf/ddr_high_amo_smoke.elf" --array-name zx32_ddr_high_amo_smoke_elf
+  printf '\n'
   python3 "$bin2c" "$build_dir/elf/sbi_firmware_smoke.elf" --array-name zx32_sbi_firmware_smoke_elf
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/sbi_payload_smoke.elf" --array-name zx32_sbi_payload_smoke_elf
@@ -93,6 +116,18 @@ trap 'rm -f "$tmp_header"' EXIT
   python3 "$bin2c" "$build_dir/elf/sbi_timer_firmware_smoke.elf" --array-name zx32_sbi_timer_firmware_smoke_elf
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/sbi_timer_payload_smoke.elf" --array-name zx32_sbi_timer_payload_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_contract_firmware_smoke.elf" --array-name zx32_linux_contract_firmware_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_contract_payload_smoke.elf" --array-name zx32_linux_contract_payload_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_image_layout_smoke.elf" --array-name zx32_linux_image_layout_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_sbi_firmware_smoke.elf" --array-name zx32_linux_sbi_firmware_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_sbi_payload_smoke.elf" --array-name zx32_linux_sbi_payload_smoke_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_boot_firmware.elf" --array-name zx32_linux_boot_firmware_elf
   printf '\n#endif\n'
 } > "$tmp_header"
 
