@@ -171,16 +171,15 @@ IMEM verify: 0 errors
 Releasing PL CPU at Linux entry
 
 Linux SBI console mirror
-SBI specification v0.2 detected
-SBI implementation ID=0x5a32 Version=0x1
-SBI v0.2 TIME extension detected
-Run /init as init process
+Saving 2048 bits of non-creditable seed for next boot
+Starting syslogd: OK
+Starting klogd: OK
+Running sysctl: OK
+Starting network: OK
+Starting crond: OK
 
-[zx32-init] userspace entered
-[zx32-init] getpid ok
-[zx32-init] alive
-[zx32-init] idle
-Boot monitor: userspace idle reached
+Welcome to Buildroot
+buildroot login:
 ```
 
 Useful timer sanity values in the final counter line:
@@ -202,8 +201,8 @@ get=<non-zero>
 - Linux boot contract smoke: M-mode firmware enters an S-mode payload with Linux-style `a0=hartid` and `a1=dtb`, the payload reads a DTB-like magic word from DDR, calls SBI base/timer services, and observes a delegated S-mode timer interrupt.
 - Linux SBI compatibility smoke: the bring-up SBI behavior matches the pieces the real Linux boot path expects.
 - Linux image layout smoke: the kernel Image header, DTB magic, and configured DDR placement match the launcher assumptions.
-- Linux boot launcher: the real kernel reaches initramfs userspace and the userspace smoke reaches its idle marker.
+- Linux boot launcher: the real kernel reaches Buildroot userspace, starts the default services, and exposes a login prompt on `hvc0`.
 
-These prove a minimal real Linux boot path. 
+These prove a minimal interactive real Linux boot path.
 
-They do not yet prove a full BusyBox userspace, production drivers, or performance.
+They do not yet prove production drivers, terminal performance, or a complete platform ABI.

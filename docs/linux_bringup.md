@@ -1,22 +1,26 @@
 # Linux Bring-Up
 
-This document records the current board-proven Linux path for ZYNQ_CPU. The milestone is not a full distribution or BusyBox system yet, but it is a real mainline RV32 Linux boot into an embedded initramfs userspace.
+This document records the current board-proven Linux path for ZYNQ_CPU. The board now boots a mainline RV32 Linux kernel into an embedded Buildroot/BusyBox initramfs and reaches an interactive `hvc0` login shell.
 
 ## Current Board-Proven Milestone
 
 The current Linux boot run reaches:
 
 ```text
-SBI specification v0.2 detected
-SBI implementation ID=0x5a32 Version=0x1
-SBI v0.2 TIME extension detected
-Run /init as init process
+Linux SBI console mirror
+Saving 2048 bits of non-creditable seed for next boot
+Starting syslogd: OK
+Starting klogd: OK
+Running sysctl: OK
+Starting network: OK
+Starting crond: OK
 
-[zx32-init] userspace entered
-[zx32-init] getpid ok
-[zx32-init] alive
-[zx32-init] idle
-Boot monitor: userspace idle reached
+Welcome to Buildroot
+buildroot login: root
+# uname -a
+Linux buildroot 5.10.0+ ... riscv32 GNU/Linux
+# hostname
+buildroot
 ```
 
 This proves the following pieces work together on hardware:
@@ -27,9 +31,9 @@ This proves the following pieces work together on hardware:
 - SBI v0.2 base probing and TIME extension probing.
 - SBI legacy console put/get path used by early console and `hvc0`.
 - SBI timer programming and repeated Linux timer events.
-- Sv32 page-table setup far enough for kernel init and a tiny userspace ELF.
+- Sv32 page-table setup far enough for kernel init and BusyBox userspace.
 - Embedded initramfs execution through `rdinit=/init`.
-- A userspace `getpid` syscall smoke test followed by a quiet idle loop.
+- Buildroot init scripts, syslog/klog, sysctl, networking setup, crond, getty, login, and an interactive shell.
 
 ## Boot Flow
 
@@ -51,10 +55,11 @@ Linux kernel
   -> consumes DTB at 0x8160_0000
   -> uses SBI console and timer
   -> mounts the built-in initramfs
-  -> execs /init
+  -> execs /init -> /sbin/init
+  -> starts Buildroot services and hvc0 getty
 ```
 
-The initramfs payload is assembled from `linux/initramfs/init.S` by `scripts/build_zx32_initramfs.sh`, then embedded into the kernel build through a generated `CONFIG_INITRAMFS_SOURCE` entry.
+The initramfs payload is the Buildroot root filesystem produced by `scripts/build_zx32_busybox_rootfs.sh`. `scripts/build_mainline_rv32_linux.sh` embeds `build/buildroot-zx32/images/rootfs.cpio` through a generated `CONFIG_INITRAMFS_SOURCE` entry.
 
 ## SBI Shim
 
@@ -66,7 +71,7 @@ The local firmware is deliberately small. It currently handles:
 | SBI TIME `0x54494d45` | `set_timer` |
 | legacy `0` | legacy timer compatibility |
 | legacy `1` | console putchar into a PS-drained scratch ring |
-| legacy `2` | console getchar, currently returns `-1` |
+| legacy `2` | console getchar from a PS-fed scratch input ring |
 | debug `0x5a444247` | local debug marker used by bring-up code |
 
 Linux reads time through the CPU `time/timeh` CSRs, while the current MMIO timer interrupt is programmed through `mtimecmp` at `0x10010008`. The firmware bridges that difference on the first timer call:
@@ -78,23 +83,27 @@ mtimecmp = max(requested_rdtime + offset, current_mtime + 0x10000)
 
 The offset is stored in the scratch mailbox and later boot samples should show `off_valid=1`, an increasing `mtime`, and `cmp` ahead of `mtime`.
 
-## Console Mirror
+## Console Path
 
 Linux console output is written through SBI console putchar into a 256-byte ring inside the TX scratch region. The PS launcher drains that ring and prints a `Linux SBI console mirror` section on PS UART.
 
-The launcher watches for the exact string:
+Console input flows in the other direction: the PS launcher drains the PS UART RX FIFO into a 128-byte scratch input ring, and SBI console getchar consumes that ring for Linux `hvc0`. A legacy single-byte mailbox remains as a fallback.
+
+The board-proven login signature is:
 
 ```text
-[zx32-init] idle
+Welcome to Buildroot
+buildroot login:
 ```
 
-When it sees that marker, it prints:
+After logging in as `root`, basic interactive commands should work:
 
 ```text
-Boot monitor: userspace idle reached
+# uname -a
+# hostname
 ```
 
-After that point the run is considered successful and the launcher suppresses most periodic SBI/TIME noise.
+The PS launcher is intentionally quiet in the normal path; detailed boot monitor and core state dumps should be enabled only for diagnosis.
 
 ## Source Files
 
@@ -105,10 +114,9 @@ After that point the run is considered successful and the launcher suppresses mo
 | `hw_bringup/download_zynq_cpu_linux_boot.xsbl` | XSCT entry for the real Linux boot run |
 | `linux/zynq_cpu.dts` | DTB source for the current custom platform |
 | `linux/zx32_rv32.config` | minimal RV32 Linux config fragment |
-| `linux/initramfs/init.S` | tiny userspace init payload |
 | `scripts/prepare_mainline_linux.sh` | fetch/prepare Linux source tree |
+| `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 kernel Image |
-| `scripts/build_zx32_initramfs.sh` | build `/init` and initramfs file list |
 | `scripts/prepare_linux_boot_artifacts.sh` | build DTB and validate Image/DTB placement |
 | `scripts/build_ps_uart_probe.sh` | build both PS probe launchers and generated payloads |
 
@@ -118,6 +126,7 @@ The normal build sequence is:
 
 ```sh
 ./scripts/prepare_mainline_linux.sh
+./scripts/build_zx32_busybox_rootfs.sh
 ./scripts/build_mainline_rv32_linux.sh
 ./scripts/prepare_linux_boot_artifacts.sh
 ./scripts/build_ps_uart_probe.sh
@@ -137,19 +146,17 @@ Use the ordinary board probe for broader CPU/SoC smoke tests:
 
 ## Known Limits
 
-- The userspace is a hand-written static RV32 assembly `_start`, not BusyBox.
-- There is no interactive shell yet.
 - The SBI shim is local bring-up firmware, not a full OpenSBI port.
 - Timer bridging currently depends on a measured `rdtime` to MMIO `mtime` offset.
 - Linux-visible custom UART, timer, interrupt controller, and DataMover drivers are not implemented.
 - The direct DDR bridge is uncached, single-beat, and slow; correctness is the current priority.
 - The DTB is still a bring-up description and should be updated whenever the platform ABI changes.
+- Console input is functional but still routed through the PS launcher polling loop and scratch ring, so it is not a high-performance terminal path.
 
 ## Next Steps
 
-1. Keep the `userspace idle reached` signature stable as a regression target.
-2. Add a few more tiny `/init` syscall smokes before introducing libc or BusyBox.
-3. Replace the hand-written initramfs with a minimal BusyBox or libc-based initramfs.
-4. Clean up the SBI timer model and document whether `time` and `mtime` share a permanent clock domain.
-5. Decide whether the long-term console is SBI/HVC-only or a Linux driver for the PL UART.
-6. Expand MMU, trap, interrupt, and AMO regression tests around the real Linux behavior now observed on hardware.
+1. Keep the Buildroot login signature stable as the Linux boot regression target.
+2. Reduce the latency of the PS-polled console input path or replace it with a Linux-visible UART path.
+3. Clean up the SBI timer model and document whether `time` and `mtime` share a permanent clock domain.
+4. Decide whether the long-term console is SBI/HVC-only or a Linux driver for the PL UART.
+5. Expand MMU, trap, interrupt, and AMO regression tests around the real Linux behavior now observed on hardware.

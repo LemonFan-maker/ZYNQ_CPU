@@ -27,7 +27,7 @@ Current behavior:
 - no burst fetch
 - no outstanding request queue
 
-This is enough for the current Linux smoke boot, including kernel instruction fetches, kernel data accesses, page-table walks, and the tiny initramfs userspace. 
+This is enough for the current Buildroot Linux boot, including kernel instruction fetches, kernel data accesses, page-table walks, and BusyBox userspace.
 
 It is still an uncached, single-beat bring-up path rather than a performance-oriented Linux memory subsystem.
 

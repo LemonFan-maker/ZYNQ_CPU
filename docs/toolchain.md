@@ -24,7 +24,7 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
-| `scripts/build_zx32_initramfs.sh` | build the tiny RV32 `/init` payload and initramfs file list |
+| `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as Linux initramfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
 | `scripts/prepare_linux_boot_artifacts.sh` | build the DTB and validate the Linux Image/DTB layout |
 | `scripts/run_vivado.sh` | Vivado 2025.2 wrapper |
@@ -90,12 +90,15 @@ Prepare and build the current Linux boot artifacts:
 
 ```sh
 ./scripts/prepare_mainline_linux.sh
+./scripts/build_zx32_busybox_rootfs.sh
 ./scripts/build_mainline_rv32_linux.sh
 ./scripts/prepare_linux_boot_artifacts.sh
 ```
 
-`scripts/build_mainline_rv32_linux.sh` also runs
-`scripts/build_zx32_initramfs.sh` by default, unless `ZX32_INITRAMFS=0` is set.
+`scripts/build_mainline_rv32_linux.sh` embeds
+`build/buildroot-zx32/images/rootfs.cpio` by default. Set
+`LINUX_INITRAMFS_SOURCE` to point at another initramfs, or set
+`ZX32_INITRAMFS=0` to build without an embedded initramfs.
 
 Run RTL-only Vivado synthesis:
 
@@ -139,7 +142,7 @@ Common generated outputs:
 - `hw_bringup/build/ps_linux_boot.elf`
 - `linux/kernel/`
 - `build/linux-mainline-rv32/`
-- `build/linux-initramfs/`
+- `build/buildroot-zx32/`
 - `build/linux/`
 - `build/vivado_hw/`
 - `build/vivado_synth/`
@@ -154,7 +157,6 @@ The Linux-facing source files are:
 - `docs/linux_boot_layout.md`
 - `linux/zynq_cpu.dts`
 - `linux/zx32_rv32.config`
-- `linux/initramfs/init.S`
 - `hw_bringup/ps_linux_boot.c`
 - `hw_bringup/programs/linux_boot_firmware.zx32.s`
 - `hw_bringup/download_zynq_cpu_linux_boot.xsbl`

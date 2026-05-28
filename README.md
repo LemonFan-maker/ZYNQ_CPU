@@ -2,7 +2,7 @@
 
 ZYNQ_CPU is a custom RV32-class CPU and SoC bring-up project for the Zynq-7020 PL on the ALINX AX7020B board.
 
-The long-term target is to boot a usable riscv32 Linux environment on the PL CPU. The current tree has reached the first real Linux milestone: a mainline RV32 kernel boots on the board, uses the local SBI shim for early console and timer services, starts the embedded initramfs, runs `/init`, completes a `getpid` syscall smoke test, and reaches a quiet userspace idle loop. It is still a bring-up Linux environment rather than a full BusyBox system.
+The long-term target is to boot a usable riscv32 Linux environment on the PL CPU. The current tree now boots a mainline RV32 kernel on the board, uses the local SBI shim for console and timer services, starts an embedded Buildroot/BusyBox initramfs, reaches `buildroot login:`, and accepts interactive `hvc0` input through the PS/SBI console bridge. It is still a bring-up Linux environment, but it is now a usable minimal userspace rather than only an early boot marker.
 
 ## Current Status
 
@@ -38,23 +38,25 @@ Latest board-level bring-up has passed:
 - Linux boot contract smoke
 - Linux SBI compatibility smoke
 - Linux image layout smoke
-- Linux boot to initramfs userspace:
-  - `SBI specification v0.2 detected`
-  - `SBI v0.2 TIME extension detected`
-  - `Run /init as init process`
-  - `[zx32-init] userspace entered`
-  - `[zx32-init] getpid ok`
-  - `[zx32-init] idle`
-  - `Boot monitor: userspace idle reached`
+- Linux boot to Buildroot userspace:
+  - `Saving 2048 bits of non-creditable seed for next boot`
+  - `Starting syslogd: OK`
+  - `Starting klogd: OK`
+  - `Running sysctl: OK`
+  - `Starting network: OK`
+  - `Starting crond: OK`
+  - `Welcome to Buildroot`
+  - `buildroot login:`
 
-The current Linux path is intentionally minimal:
+The current Linux path is intentionally simple:
 
-- the initramfs is embedded in the kernel Image from `linux/initramfs/init.S`;
+- the Buildroot rootfs is embedded in the kernel Image from `build/buildroot-zx32/images/rootfs.cpio`;
 - console output is mirrored through an SBI console scratch ring and drained by the PS launcher;
-- the local M-mode firmware implements only the SBI pieces needed by this kernel smoke path;
-- no BusyBox shell, libc userspace, block/network device stack, or production device drivers are present yet.
+- console input is forwarded from PS UART through a scratch-backed SBI getchar ring;
+- the local M-mode firmware implements only the SBI pieces needed by this board path;
+- production device drivers and a stable platform ABI are not present yet.
 
-The next Linux work is to grow this from a board-proven smoke environment into a repeatable small userspace with cleaner SBI/platform contracts.
+The next Linux work is to make this Buildroot environment repeatable, reduce console input latency, and clean up the SBI/platform contracts.
 
 ## Target Board
 
@@ -75,7 +77,7 @@ The next Linux work is to grow this from a board-proven smoke environment into a
 | `tb/` | Icarus Verilog/SystemVerilog testbenches |
 | `tools/` | ZX32 assembler, ELF packer, and unit tests |
 | `hw_bringup/` | PS UART probe and PL CPU assembly smoke programs |
-| `linux/` | Linux DTS, config fragment, and initramfs sources |
+| `linux/` | Linux DTS and config fragment |
 | `docs/linux_*.md` | Linux boot layout and bring-up contract notes |
 | `vivado/` | Vivado batch scripts for synthesis and hardware bring-up |
 | `scripts/` | Project automation entry points |
@@ -132,6 +134,7 @@ Prepare and run the current Linux boot path:
 
 ```sh
 ./scripts/prepare_mainline_linux.sh
+./scripts/build_zx32_busybox_rootfs.sh
 ./scripts/build_mainline_rv32_linux.sh
 ./scripts/prepare_linux_boot_artifacts.sh
 ./scripts/build_ps_uart_probe.sh

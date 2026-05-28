@@ -2,7 +2,7 @@
 
 The project goal is a custom PL CPU that can run a useful riscv32 Linux environment. 
 
-The first real Linux milestone is now complete: the board boots a mainline RV32 kernel into an embedded initramfs `/init`, completes a userspace `getpid` smoke test, and reaches a quiet idle loop.
+The first useful Linux milestone is now complete: the board boots a mainline RV32 kernel into an embedded Buildroot/BusyBox initramfs, starts the standard init scripts, reaches `buildroot login:`, and accepts interactive `hvc0` input.
 
 ## Completed Bring-Up Milestones
 
@@ -30,7 +30,8 @@ These are already represented in code, tests, or board logs:
 - PS-side real Linux Image/DTB loader
 - local SBI shim with console and TIME services sufficient for kernel boot
 - mainline RV32 Linux reaches `Run /init as init process`
-- embedded `/init` prints `userspace entered`, completes `getpid`, and reaches `idle`
+- embedded Buildroot rootfs starts syslogd, klogd, sysctl, network setup, crond, and getty
+- interactive login over `hvc0` works through the PS/SBI console bridge
 - Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
 
 ## Current Development Stage
@@ -38,16 +39,20 @@ These are already represented in code, tests, or board logs:
 The active stage is:
 
 ```text
-turn the board-proven Linux smoke boot into a useful minimal userspace
+stabilize the board-proven Buildroot userspace and platform ABI
 ```
 
 The immediate success signature to preserve is:
 
 ```text
-[zx32-init] userspace entered
-[zx32-init] getpid ok
-[zx32-init] idle
-Boot monitor: userspace idle reached
+Saving 2048 bits of non-creditable seed for next boot
+Starting syslogd: OK
+Starting klogd: OK
+Running sysctl: OK
+Starting network: OK
+Starting crond: OK
+Welcome to Buildroot
+buildroot login:
 ```
 
 Do not treat later Linux regressions as userspace or kernel bugs until this signature still reproduces with the same Image/DTB/firmware layout.
@@ -60,7 +65,6 @@ Source-of-truth files:
 - `docs/linux_boot_layout.md`
 - `linux/zynq_cpu.dts`
 - `linux/zx32_rv32.config`
-- `linux/initramfs/init.S`
 - `hw_bringup/ps_linux_boot.c`
 - `hw_bringup/programs/linux_boot_firmware.zx32.s`
 - `hw_bringup/download_zynq_cpu_linux_boot.xsbl`
@@ -69,49 +73,45 @@ Generated artifacts:
 
 - `linux/kernel/`
 - `build/linux-mainline-rv32/`
-- `build/linux-initramfs/`
+- `build/buildroot-zx32/`
 - `build/linux/`
 - `hw_bringup/build/`
 
 These generated paths are ignored and should not become source-of-truth.
 
-## Next Milestone: Stable Linux Smoke Regression
+## Next Milestone: Stable Buildroot Regression
 
-Goal: make the current Linux boot easy to rerun and compare.
+Goal: make the current Linux boot and login path easy to rerun and compare.
 
 Required work:
 
-- keep the final success condition as `Boot monitor: userspace idle reached`
-- reduce or gate noisy periodic monitor samples
+- keep the final success condition as `Welcome to Buildroot` followed by `buildroot login:`
+- keep the PS launcher quiet by default and gate noisy periodic monitor samples
 - keep a compact expected-log section in `docs/hardware_uart_test.md`
 - record the exact Image/DTB addresses through `build/linux/boot_artifacts.env`
 - make all Linux boot diagnostics explainable from `docs/linux_boot_layout.md`
 
-## Next Milestone: Richer Tiny Userspace
+## Next Milestone: Better Interactive Console
 
-Goal: expand `/init` before bringing in a larger userspace.
-
-Suggested syscall smokes:
-
-- `getpid`
-- `write`
-- `uname` or another simple read-only syscall
-- `clock_gettime` or `nanosleep` once timer behavior is stable enough
-- simple fork/exec only after memory behavior is better characterized
-
-Keep this stage assembly-only or otherwise very small. The point is to isolate kernel/platform behavior before libc and BusyBox add noise.
-
-## Next Milestone: BusyBox or Minimal Libc Initramfs
-
-Goal: reach an interactive or scriptable userspace.
+Goal: make the interactive terminal path feel usable instead of merely functional.
 
 Required work:
 
-- choose a riscv32 userspace toolchain and ABI strategy
-- build a static BusyBox or smaller libc-based init
-- decide whether `/dev/console` through `hvc0` is enough
-- verify initramfs size still fits before the DTB placement at `0x81600000`
-- keep the old assembly `/init` as a known-good fallback
+- reduce input latency in the PS UART to SBI getchar path
+- keep the scratch-ring overflow behavior explicit and observable
+- decide whether `hvc0` remains the primary console or becomes only an early-console path
+- validate repeated login shell commands, line editing, and long input bursts
+
+## Next Milestone: Buildroot Platform Cleanup
+
+Goal: remove remaining bring-up assumptions from the Buildroot/Linux configuration.
+
+Required work:
+
+- keep rootfs size within the current Image/DTB placement constraints
+- remove or explain init scripts for Linux features the platform does not implement yet
+- verify POSIX timer, sysctl, network setup, crond, getty, and shell behavior after kernel config changes
+- decide which Buildroot packages are useful enough to keep in the default rootfs
 
 ## Next Milestone: Firmware and Platform ABI Cleanup
 

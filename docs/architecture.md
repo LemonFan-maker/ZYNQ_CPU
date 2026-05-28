@@ -104,7 +104,7 @@ This is enough for the current S-mode timer smokes and the real Linux boot path.
 
 ## Linux Status
 
-The architecture now boots a mainline RV32 Linux kernel to a tiny embedded initramfs userspace on the board. The board-proven path is:
+The architecture now boots a mainline RV32 Linux kernel to an embedded Buildroot/BusyBox userspace on the board. The board-proven path is:
 
 ```text
 PS launcher
@@ -112,14 +112,15 @@ PS launcher
   -> DTB at CPU 0x8160_0000 / PS 0x0170_0000
   -> M-mode SBI firmware in IMEM
   -> Linux S-mode entry with a0=0, a1=0x8160_0000, satp=0
-  -> /init from built-in initramfs
+  -> /init -> /sbin/init from built-in Buildroot initramfs
 ```
 
 Current Linux-visible behavior:
 
 - early console and `hvc0` use SBI console calls mirrored through the PS-visible scratch ring
+- `hvc0` input is forwarded from PS UART through a scratch-backed SBI getchar ring
 - timer events use SBI TIME and the local MMIO timer
-- Sv32 page walking and the TLB are sufficient for kernel init and the tiny userspace smoke
+- Sv32 page walking and the TLB are sufficient for kernel init and Buildroot userspace
 - the direct DDR bridge provides uncached single-beat instruction/data access
 - no Linux drivers exist yet for the custom PL UART, timer, IRQ controller, or DataMover blocks
 

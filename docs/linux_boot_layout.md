@@ -27,7 +27,7 @@ Examples:
 | M-mode firmware | `0x0000_0000` | PS writes through IMEM aperture | `linux_boot_firmware.zx32.s` |
 | Linux kernel Image | `0x8040_0000` | `0x0050_0000` | RISC-V Image with text offset `0x0040_0000` |
 | DTB | `0x8160_0000` | `0x0170_0000` | built from `linux/zynq_cpu.dts` |
-| initramfs | embedded in Image | embedded in Image | generated from `build/linux-initramfs/initramfs.list` |
+| initramfs | embedded in Image | embedded in Image | Buildroot `build/buildroot-zx32/images/rootfs.cpio` |
 | SBI console/counter scratch | `0x2001_0000` | AXI-Lite TX scratch aperture | PS-visible mailbox and ring |
 | MMIO timer | `0x1001_0000` | PL CPU MMIO | `mtime` and `mtimecmp` |
 
