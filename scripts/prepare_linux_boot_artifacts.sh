@@ -7,6 +7,8 @@ image="${LINUX_IMAGE:-$linux_out/arch/riscv/boot/Image}"
 dtb_src="${LINUX_DTS:-$repo_dir/linux/zynq_cpu.dts}"
 artifact_dir="${LINUX_ARTIFACT_DIR:-$repo_dir/build/linux}"
 dtb_out="${LINUX_DTB:-$artifact_dir/zynq_cpu.dtb}"
+sim_dtb_src="${LINUX_SIM_DTS:-$repo_dir/linux/zx32sim_virtio.dts}"
+sim_dtb_out="${LINUX_SIM_DTB:-$artifact_dir/zx32sim_virtio.dtb}"
 manifest="$artifact_dir/boot_artifacts.env"
 
 kernel_cpu_addr="0x80400000"
@@ -27,6 +29,9 @@ fi
 
 mkdir -p "$artifact_dir"
 dtc -I dts -O dtb -o "$dtb_out" "$dtb_src"
+if [[ -f "$sim_dtb_src" ]]; then
+    dtc -I dts -O dtb -o "$sim_dtb_out" "$sim_dtb_src"
+fi
 
 text_offset="$(od -An -t x8 -j 8 -N 8 "$image" | tr -d '[:space:]')"
 magic="$(od -An -t x1 -j 48 -N 8 "$image" | tr -d '[:space:]')"
@@ -64,10 +69,14 @@ KERNEL_CPU_ADDR=$kernel_cpu_addr
 KERNEL_PS_ADDR=$kernel_ps_addr
 DTB_CPU_ADDR=$dtb_cpu_addr
 DTB_PS_ADDR=$dtb_ps_addr
+LINUX_SIM_DTB=$sim_dtb_out
 EOF
 
 echo "Linux Image: $image"
 echo "Linux DTB: $dtb_out"
+if [[ -f "$sim_dtb_out" ]]; then
+    echo "Linux simulator DTB: $sim_dtb_out"
+fi
 echo "Image size: $image_size bytes"
 echo "Kernel: CPU $kernel_cpu_addr -> PS $kernel_ps_addr"
 echo "DTB: CPU $dtb_cpu_addr -> PS $dtb_ps_addr"

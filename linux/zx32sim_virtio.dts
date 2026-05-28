@@ -1,0 +1,97 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    compatible = "orion,zynq-cpu";
+    model = "ZYNQ_CPU RV32 simulator virtio platform";
+
+    chosen {
+        bootargs = "earlycon=sbi console=hvc0 rdinit=/init lpj=10000";
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x01800000>;
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <750000000>;
+
+        cpu0: cpu@0 {
+            device_type = "cpu";
+            reg = <0>;
+            status = "okay";
+            compatible = "riscv";
+            riscv,isa = "rv32ima";
+            mmu-type = "riscv,sv32";
+
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                interrupt-controller;
+                compatible = "riscv,cpu-intc";
+            };
+        };
+    };
+
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+
+        uart0: serial@10000000 {
+            compatible = "orion,zynq-cpu-uart";
+            reg = <0x10000000 0x1000>;
+            status = "disabled";
+        };
+
+        timer0: timer@10010000 {
+            compatible = "orion,zynq-cpu-timer";
+            reg = <0x10010000 0x1000>;
+            interrupts-extended = <&cpu0_intc 5>;
+            status = "okay";
+        };
+
+        datamover0: dma@10020000 {
+            compatible = "orion,zynq-cpu-datamover";
+            reg = <0x10020000 0x1000>;
+            status = "okay";
+        };
+
+        irqctrl0: interrupt-controller@10040000 {
+            compatible = "orion,zynq-cpu-irqctrl";
+            reg = <0x10040000 0x1000>;
+            interrupt-controller;
+            #interrupt-cells = <1>;
+            interrupts-extended = <&cpu0_intc 9>;
+            status = "okay";
+        };
+
+        plic0: interrupt-controller@c000000 {
+            compatible = "sifive,plic-1.0.0";
+            reg = <0x0c000000 0x00400000>;
+            interrupt-controller;
+            #address-cells = <0>;
+            #interrupt-cells = <1>;
+            riscv,ndev = <1>;
+            interrupts-extended = <&cpu0_intc 9>;
+            status = "okay";
+        };
+
+        virtio_blk0: virtio@10060000 {
+            compatible = "virtio,mmio";
+            reg = <0x10060000 0x1000>;
+            interrupts-extended = <&plic0 1>;
+            status = "okay";
+        };
+
+        scratchpad0: sram@20000000 {
+            compatible = "mmio-sram";
+            reg = <0x20000000 0x1000>;
+            status = "okay";
+        };
+    };
+};

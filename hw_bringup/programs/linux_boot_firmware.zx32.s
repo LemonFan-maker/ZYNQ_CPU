@@ -6,7 +6,7 @@
 
     li t0, 0xB1FF
     csrw medeleg, t0
-    li t0, 0x20
+    li t0, 0x220
     csrw mideleg, t0
     li t0, 0x7
     csrw mcounteren, t0
