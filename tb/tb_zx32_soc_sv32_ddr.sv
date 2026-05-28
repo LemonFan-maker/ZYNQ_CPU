@@ -192,6 +192,7 @@ module tb_zx32_soc_sv32_ddr;
     endtask
 
     task automatic host_read(input logic [31:0] addr, output logic [31:0] data);
+        bit saw_not_ready;
         begin
             @(negedge clk);
             host_addr = addr;
@@ -199,9 +200,14 @@ module tb_zx32_soc_sv32_ddr;
             host_wstrb = 4'd0;
             host_we = 1'b0;
             host_valid = 1'b1;
+            saw_not_ready = 1'b0;
             do begin
                 @(posedge clk);
-            end while (host_ready !== 1'b1);
+                if (host_ready !== 1'b1) begin
+                    saw_not_ready = 1'b1;
+                end
+            end while (!saw_not_ready || host_ready !== 1'b1);
+            #1;
             data = host_rdata;
             @(negedge clk);
             host_valid = 1'b0;

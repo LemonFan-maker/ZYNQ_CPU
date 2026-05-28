@@ -5,6 +5,10 @@
 #include "xil_printf.h"
 #include "zx32_programs.h"
 
+#ifndef ZX32_LINUX_BOOT_TRACE
+#define ZX32_LINUX_BOOT_TRACE 0
+#endif
+
 static u32 cpu_ddr_to_ps_addr(u32 cpu_addr)
 {
     return cpu_addr - ZYNQ_CPU_DDR_CPU_BASE + ZYNQ_CPU_DDR_PHYS_BASE;
@@ -240,6 +244,7 @@ static int print_linux_console_mirror(u32 *last_total, int *started)
         }
 
         (*last_total)++;
+        Xil_Out32(CPU_LINUX_CONSOLE_RING_HEAD, *last_total);
     }
 
     return idle_seen;
@@ -288,6 +293,9 @@ int main(void)
     u32 ps_magic1;
     u32 ps_magic2;
     u32 ps_dtb_magic;
+    u32 scratch_words;
+    u32 scratch_bytes;
+    u32 ring_offset;
     u32 last_mcause = 0xffffffffU;
     u32 last_mepc = 0xffffffffU;
     u32 last_eid = 0xffffffffU;
@@ -319,6 +327,10 @@ int main(void)
     xil_printf("> ZYNQ_CPU Linux boot launcher\r\n");
     xil_printf("Diag rev: linux_bring_up\r\n");
 
+    scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
+    scratch_bytes = scratch_words * 4U;
+    ring_offset = CPU_LINUX_CONSOLE_RING_BASE - ZYNQ_CPU_TX_SCRATCH;
+
     ps_code0 = Xil_In32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR);
     ps_text_lo = Xil_In32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR + 8U);
     ps_text_hi = Xil_In32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR + 12U);
@@ -331,6 +343,10 @@ int main(void)
     xil_printf("Kernel CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_LINUX_KERNEL_CPU_ADDR);
     xil_printf("DTB PS: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_LINUX_DTB_PS_ADDR);
     xil_printf("DTB CPU: 0x%08x\r\n", (unsigned int)ZYNQ_CPU_LINUX_DTB_CPU_ADDR);
+    xil_printf("Scratch words: %u\r\n", (unsigned int)scratch_words);
+    xil_printf("Console ring: off=0x%08x bytes=%u\r\n",
+               (unsigned int)ring_offset,
+               (unsigned int)CPU_LINUX_CONSOLE_RING_BYTES);
     xil_printf("PS code0: 0x%08x\r\n", (unsigned int)ps_code0);
     xil_printf("PS text lo: 0x%08x\r\n", (unsigned int)ps_text_lo);
     xil_printf("PS magic0: 0x%08x\r\n", (unsigned int)ps_magic0);
@@ -346,6 +362,13 @@ int main(void)
         ps_magic2 != ZYNQ_CPU_LINUX_IMAGE_MAGIC2 ||
         ps_dtb_magic != ZYNQ_CPU_DTB_MAGIC_RAW) {
         xil_printf("Linux boot artifacts missing or at the wrong DDR address\r\n");
+        while (1) {
+        }
+    }
+
+    if (ring_offset > scratch_bytes ||
+        CPU_LINUX_CONSOLE_RING_BYTES > (scratch_bytes - ring_offset)) {
+        xil_printf("Linux console ring outside TX scratch aperture\r\n");
         while (1) {
         }
     }
@@ -443,7 +466,7 @@ int main(void)
                                         fid != last_fid ||
                                         (!noisy_sbi && arg0 != last_arg0));
 
-            if (boot_monitor_changed && !noisy_sbi) {
+            if (ZX32_LINUX_BOOT_TRACE != 0 && boot_monitor_changed && !noisy_sbi) {
                 xil_printf("Boot monitor: status=0x%08x mcause=0x%08x mepc=0x%08x eid=0x%08x fid=0x%08x arg0=0x%08x ret=0x%08x val=0x%08x cmp=0x%08x%08x off=0x%08x%08x mtime=0x%08x%08x\r\n",
                            (unsigned int)status,
                            (unsigned int)mcause,
@@ -467,11 +490,12 @@ int main(void)
             last_arg0 = arg0;
         }
 
-        if (last_trap_count == 0xffffffffU ||
-            (trap_count - last_trap_count) >= 4096U ||
-            base_count != last_base_count ||
-            debug_count != last_debug_count ||
-            unsupported_count != last_unsupported_count) {
+        if (ZX32_LINUX_BOOT_TRACE != 0 &&
+            (last_trap_count == 0xffffffffU ||
+             (trap_count - last_trap_count) >= 4096U ||
+             base_count != last_base_count ||
+             debug_count != last_debug_count ||
+             unsupported_count != last_unsupported_count)) {
             print_linux_sbi_counters();
             last_ecall_count = ecall_count;
             last_time_count = time_count;
@@ -483,7 +507,7 @@ int main(void)
             last_trap_count = trap_count;
         }
 
-        if (last_pc == 0xffffffffU || satp != last_satp) {
+        if (ZX32_LINUX_BOOT_TRACE != 0 && (last_pc == 0xffffffffU || satp != last_satp)) {
             xil_printf("Boot pc: pc=0x%08x satp=0x%08x scause=0x%08x sepc=0x%08x eid=0x%08x fid=0x%08x arg0=0x%08x\r\n",
                        (unsigned int)pc,
                        (unsigned int)satp,
@@ -496,7 +520,7 @@ int main(void)
             last_satp = satp;
         }
 
-        if (head_marker != last_head_marker) {
+        if (ZX32_LINUX_BOOT_TRACE != 0 && head_marker != last_head_marker) {
             u32 head_a0 = Xil_In32(CPU_LINUX_HEAD_A0);
             u32 head_a1 = Xil_In32(CPU_LINUX_HEAD_A1);
 
@@ -531,13 +555,13 @@ int main(void)
             }
             report_count++;
             if (report_count == boot_watchdog_reports) {
-                if (userspace_idle_seen != 0) {
+                if (ZX32_LINUX_BOOT_TRACE != 0 && userspace_idle_seen != 0) {
                     idle_report_count++;
                     if ((idle_report_count & 0x3U) == 0U) {
                         xil_printf("Boot monitor: userspace idle sample\r\n");
                         print_linux_sbi_counters();
                     }
-                } else {
+                } else if (ZX32_LINUX_BOOT_TRACE != 0) {
                     xil_printf("Boot monitor: periodic sample\r\n");
                     print_linux_sbi_counters();
                     print_linux_progress_probe("Progress", &last_probe_dmem, &last_probe_imem);

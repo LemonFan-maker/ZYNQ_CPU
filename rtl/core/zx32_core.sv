@@ -149,6 +149,8 @@ module zx32_core (
 
     logic [31:0] pc;
     logic [31:0] instr;
+    logic [31:0] instr_q;
+    logic [31:0] decode_instr;
     logic [31:0] next_pc;
     logic [31:0] alu_y;
     logic [31:0] rs1_data;
@@ -240,6 +242,9 @@ module zx32_core (
     logic        tlb_lookup_hit;
     logic        tlb_lookup_fault;
     logic [31:0] tlb_lookup_paddr;
+    logic        tlb_lookup_hit_q;
+    logic        tlb_lookup_fault_q;
+    logic [31:0] tlb_lookup_paddr_q;
     logic [31:0] dm_addr_q;
     logic [31:0] dm_len_q;
     logic [31:0] dm_status_q;
@@ -582,20 +587,21 @@ module zx32_core (
         end
     endfunction
 
-    assign opcode = instr[6:0];
-    assign rd     = instr[11:7];
-    assign funct3 = instr[14:12];
-    assign rs1    = instr[19:15];
-    assign rs2    = instr[24:20];
-    assign funct7 = instr[31:25];
+    assign decode_instr = (state == ST_DECODE || state == ST_EXECUTE) ? instr : instr_q;
+    assign opcode = decode_instr[6:0];
+    assign rd     = decode_instr[11:7];
+    assign funct3 = decode_instr[14:12];
+    assign rs1    = decode_instr[19:15];
+    assign rs2    = decode_instr[24:20];
+    assign funct7 = decode_instr[31:25];
 
-    assign imm_i = {{20{instr[31]}}, instr[31:20]};
-    assign imm_s = {{20{instr[31]}}, instr[31:25], instr[11:7]};
-    assign imm_b = {{19{instr[31]}}, instr[31], instr[7], instr[30:25], instr[11:8], 1'b0};
-    assign imm_u = {instr[31:12], 12'd0};
-    assign imm_j = {{11{instr[31]}}, instr[31], instr[19:12], instr[20], instr[30:21], 1'b0};
+    assign imm_i = {{20{decode_instr[31]}}, decode_instr[31:20]};
+    assign imm_s = {{20{decode_instr[31]}}, decode_instr[31:25], decode_instr[11:7]};
+    assign imm_b = {{19{decode_instr[31]}}, decode_instr[31], decode_instr[7], decode_instr[30:25], decode_instr[11:8], 1'b0};
+    assign imm_u = {decode_instr[31:12], 12'd0};
+    assign imm_j = {{11{decode_instr[31]}}, decode_instr[31], decode_instr[19:12], decode_instr[20], decode_instr[30:21], 1'b0};
     assign load_data = load_extend(load_word_q, mem_addr_q[1:0], funct3);
-    assign amo_funct5 = instr[31:27];
+    assign amo_funct5 = decode_instr[31:27];
     assign amo_lr = (opcode == OPCODE_AMO) && (funct3 == 3'b010) && (amo_funct5 == 5'b00010) && (rs2 == 5'd0);
     assign amo_sc = (opcode == OPCODE_AMO) && (funct3 == 3'b010) && (amo_funct5 == 5'b00011);
     assign amo_supported = (opcode == OPCODE_AMO) && (funct3 == 3'b010) &&
@@ -618,7 +624,7 @@ module zx32_core (
     assign custom_xcpyw = (opcode == OPCODE_CUSTOM0) && (funct3 == 3'b000) && (funct7 == 7'b0000000);
     assign custom_xdm2s = (opcode == OPCODE_CUSTOM0) && (funct3 == 3'b001) && (funct7 == 7'b0000000);
     assign custom_xds2m = (opcode == OPCODE_CUSTOM0) && (funct3 == 3'b010) && (funct7 == 7'b0000000);
-    assign csr_addr = instr[31:20];
+    assign csr_addr = decode_instr[31:20];
     assign system_csr = (opcode == OPCODE_SYSTEM) && (funct3 != 3'b000);
     assign system_ecall = (opcode == OPCODE_SYSTEM) && (funct3 == 3'b000) && (csr_addr == 12'h000);
     assign system_ebreak = (opcode == OPCODE_SYSTEM) && (funct3 == 3'b000) && (csr_addr == 12'h001);
@@ -638,7 +644,7 @@ module zx32_core (
                          (current_priv == PRIV_S ? MCAUSE_ECALL_S :
                           (current_priv == PRIV_U ? MCAUSE_ECALL_U : MCAUSE_ECALL_M)));
     assign trap_tval = page_fault_pending ? page_fault_tval :
-                       illegal_instr ? instr : 32'd0;
+                       illegal_instr ? decode_instr : 32'd0;
     assign trap_to_s = (current_priv != PRIV_M) && csr_medeleg[trap_cause[4:0]];
     assign csr_mip_view = csr_mip |
                           (irq_timer ? MIP_MTIP : 32'd0) |
@@ -1041,7 +1047,7 @@ module zx32_core (
             dmem_addr = DM_STATUS;
         end
 
-        if ((state == ST_PT_L1_REQ || state == ST_PT_L0_REQ) && !tlb_lookup_hit && !tlb_lookup_fault) begin
+        if ((state == ST_PT_L1_WAIT || state == ST_PT_L0_WAIT) && !tlb_lookup_hit_q && !tlb_lookup_fault_q) begin
             dmem_valid = 1'b1;
             dmem_we = 1'b0;
             dmem_wstrb = 4'b0000;
@@ -1093,6 +1099,7 @@ module zx32_core (
             state <= ST_RESET;
             pc <= reset_vector;
             instr <= 32'd0;
+            instr_q <= 32'd0;
             op_rs1_q <= 32'd0;
             op_rs2_q <= 32'd0;
             load_word_q <= 32'd0;
@@ -1115,6 +1122,9 @@ module zx32_core (
             req_is_fetch <= 1'b0;
             req_active <= 1'b0;
             req_pa_valid <= 1'b0;
+            tlb_lookup_hit_q <= 1'b0;
+            tlb_lookup_fault_q <= 1'b0;
+            tlb_lookup_paddr_q <= 32'd0;
             mem_addr_q <= 32'd0;
             ptw_return_state <= ST_RESET;
             ptw_pte_addr <= 32'd0;
@@ -1196,6 +1206,7 @@ module zx32_core (
                     state <= ST_EXECUTE;
                 end
                 ST_EXECUTE: begin
+                    instr_q <= instr;
                     op_rs1_q <= rs1_data;
                     op_rs2_q <= rs2_data;
                     rd_q <= rd;
@@ -1514,11 +1525,17 @@ module zx32_core (
                     end
                 end
                 ST_PT_L1_REQ: begin
-                    if (tlb_lookup_hit) begin
-                        req_paddr <= tlb_lookup_paddr;
+                    tlb_lookup_hit_q <= tlb_lookup_hit;
+                    tlb_lookup_fault_q <= tlb_lookup_fault;
+                    tlb_lookup_paddr_q <= tlb_lookup_paddr;
+                    state <= ST_PT_L1_WAIT;
+                end
+                ST_PT_L1_WAIT: begin
+                    if (tlb_lookup_hit_q) begin
+                        req_paddr <= tlb_lookup_paddr_q;
                         req_pa_valid <= 1'b1;
                         state <= ptw_return_state;
-                    end else if (tlb_lookup_fault) begin
+                    end else if (tlb_lookup_fault_q) begin
                         page_fault_pending <= 1'b1;
                         page_fault_cause <= req_is_fetch ? MCAUSE_INST_PAGE_FAULT :
                                             req_we ? MCAUSE_STORE_PAGE_FAULT : MCAUSE_LOAD_PAGE_FAULT;
@@ -1588,11 +1605,17 @@ module zx32_core (
                     end
                 end
                 ST_PT_L0_REQ: begin
-                    if (tlb_lookup_hit) begin
-                        req_paddr <= tlb_lookup_paddr;
+                    tlb_lookup_hit_q <= tlb_lookup_hit;
+                    tlb_lookup_fault_q <= tlb_lookup_fault;
+                    tlb_lookup_paddr_q <= tlb_lookup_paddr;
+                    state <= ST_PT_L0_WAIT;
+                end
+                ST_PT_L0_WAIT: begin
+                    if (tlb_lookup_hit_q) begin
+                        req_paddr <= tlb_lookup_paddr_q;
                         req_pa_valid <= 1'b1;
                         state <= ptw_return_state;
-                    end else if (tlb_lookup_fault) begin
+                    end else if (tlb_lookup_fault_q) begin
                         page_fault_pending <= 1'b1;
                         page_fault_cause <= req_is_fetch ? MCAUSE_INST_PAGE_FAULT :
                                             req_we ? MCAUSE_STORE_PAGE_FAULT : MCAUSE_LOAD_PAGE_FAULT;
@@ -1688,7 +1711,7 @@ module zx32_core (
                         page_fault_pending <= 1'b0;
                     end else if (interrupt_cause != 32'd0) begin
                         if (interrupt_to_s) begin
-                            csr_sepc <= pc;
+                            csr_sepc <= next_pc;
                             csr_scause <= interrupt_cause;
                             csr_stval <= 32'd0;
                             csr_mstatus[5] <= csr_mstatus[1];
@@ -1697,7 +1720,7 @@ module zx32_core (
                             current_priv <= PRIV_S;
                             pc <= {csr_stvec[31:2], 2'b00};
                         end else if (interrupt_to_m) begin
-                            csr_mepc <= pc;
+                            csr_mepc <= next_pc;
                             csr_mcause <= interrupt_cause;
                             csr_mtval <= 32'd0;
                             csr_mstatus[7] <= csr_mstatus[3];

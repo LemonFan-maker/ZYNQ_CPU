@@ -106,6 +106,62 @@ module tb_zx32_core;
             $fatal(1, "expected mem[20] = ffffff80, got %08x", u_ram.mem[20]);
         end
 
+        u_ram.mem[0]  = 32'h0600_0293; // addi x5, x0, 96
+        u_ram.mem[1]  = 32'h0002_a703; // lw   x14, 0(x5)
+        u_ram.mem[2]  = 32'h0007_5703; // lhu  x14, 0(x14)
+        u_ram.mem[3]  = 32'h06e0_2423; // sw   x14, 104(x0)
+        u_ram.mem[4]  = 32'h0000_006f; // jal  x0, 0
+        u_ram.mem[24] = 32'h0000_0064;
+        u_ram.mem[25] = 32'h1234_41ed;
+        u_ram.mem[26] = 32'h0000_0000;
+
+        reset_vector = 32'd0;
+        irq_timer = 1'b0;
+        irq_external = 1'b0;
+        rst_n = 1'b0;
+        repeat (4) @(posedge clk);
+        rst_n = 1'b1;
+
+        repeat (100) @(posedge clk);
+
+        if (u_ram.mem[26] !== 32'h0000_41ed) begin
+            $fatal(1, "expected load rd==rs1 lhu result mem[26] = 000041ed, got %08x x14=%08x pc=%08x dmem_addr=%08x state=%0d",
+                   u_ram.mem[26], u_core.u_regfile.regs[14], u_core.pc, dmem_addr, u_core.state);
+        end
+
+        u_ram.mem[0]  = 32'h0800_0a93; // addi x21, x0, 128
+        u_ram.mem[1]  = 32'h020a_a703; // lw   x14, 32(x21)
+        u_ram.mem[2]  = 32'h024a_a783; // lw   x15, 36(x21)
+        u_ram.mem[3]  = 32'h0047_2683; // lw   x13, 4(x14)
+        u_ram.mem[4]  = 32'hfef7_f793; // andi x15, x15, -17
+        u_ram.mem[5]  = 32'h08da_a223; // sw   x13, 132(x21)
+        u_ram.mem[6]  = 32'h0007_5703; // lhu  x14, 0(x14)
+        u_ram.mem[7]  = 32'h02fa_a223; // sw   x15, 36(x21)
+        u_ram.mem[8]  = 32'h08ea_9423; // sh   x14, 136(x21)
+        u_ram.mem[9]  = 32'h0ae0_2623; // sw   x14, 172(x0)
+        u_ram.mem[10] = 32'h0000_006f; // jal  x0, 0
+        u_ram.mem[40] = 32'h0000_00c0;
+        u_ram.mem[41] = 32'h0000_0010;
+        u_ram.mem[43] = 32'h0000_0000;
+        u_ram.mem[48] = 32'h0000_41ed;
+        u_ram.mem[49] = 32'h89ab_cdef;
+        u_ram.mem[65] = 32'h0000_0000;
+        u_ram.mem[66] = 32'h0000_0000;
+
+        reset_vector = 32'd0;
+        irq_timer = 1'b0;
+        irq_external = 1'b0;
+        rst_n = 1'b0;
+        repeat (4) @(posedge clk);
+        rst_n = 1'b1;
+
+        repeat (160) @(posedge clk);
+
+        if (u_ram.mem[43] !== 32'h0000_41ed) begin
+            $fatal(1, "expected namei-style lhu result mem[43] = 000041ed, got %08x x14=%08x pc=%08x dmem_addr=%08x state=%0d",
+                   u_ram.mem[43], u_core.u_regfile.regs[14], u_core.pc, dmem_addr, u_core.state);
+        end
+
         u_ram.mem[0]  = 32'h0400_0093; // addi x1, x0, 64
         u_ram.mem[1]  = 32'h0440_0113; // addi x2, x0, 68
         u_ram.mem[2]  = 32'h0020_820b; // xcpyw x4, x1, x2
@@ -921,6 +977,50 @@ module tb_zx32_core;
         end
         if (u_ram.mem[25] !== 32'h0000_005a) begin
             $fatal(1, "expected timer marker mem[25] = 0000005a, got %08x", u_ram.mem[25]);
+        end
+
+        u_ram.mem[0]  = 32'h0400_0093; // addi x1, x0, 0x40
+        u_ram.mem[1]  = 32'h3050_9073; // csrw mtvec, x1
+        u_ram.mem[2]  = 32'h0000_0293; // addi x5, x0, 0
+        u_ram.mem[3]  = 32'h0800_0093; // addi x1, x0, 0x80
+        u_ram.mem[4]  = 32'h3040_9073; // csrw mie, x1
+        u_ram.mem[5]  = 32'h0080_0093; // addi x1, x0, 8
+        u_ram.mem[6]  = 32'h3000_9073; // csrw mstatus, x1
+        u_ram.mem[7]  = 32'h0012_8293; // addi x5, x5, 1
+        u_ram.mem[8]  = 32'h0650_2823; // sw   x5, 112(x0)
+        u_ram.mem[9]  = 32'h0000_006f; // j    0
+        u_ram.mem[16] = 32'h3410_2173; // csrr x2, mepc
+        u_ram.mem[17] = 32'h0620_2a23; // sw   x2, 116(x0)
+        u_ram.mem[18] = 32'h05a0_0193; // addi x3, x0, 0x5a
+        u_ram.mem[19] = 32'h0630_2c23; // sw   x3, 120(x0)
+        u_ram.mem[20] = 32'h3020_0073; // mret
+        u_ram.mem[28] = 32'h0000_0000;
+        u_ram.mem[29] = 32'h0000_0000;
+        u_ram.mem[30] = 32'h0000_0000;
+
+        reset_vector = 32'd0;
+        irq_timer = 1'b0;
+        irq_external = 1'b0;
+        rst_n = 1'b0;
+        repeat (4) @(posedge clk);
+        rst_n = 1'b1;
+
+        wait (u_core.pc == 32'd28 && u_core.state == 5'd25);
+        irq_timer = 1'b1;
+        @(posedge clk);
+        irq_timer = 1'b0;
+
+        repeat (120) @(posedge clk);
+
+        if (u_ram.mem[28] !== 32'h0000_0001) begin
+            $fatal(1, "expected interrupt-resume addi to execute once mem[28] = 00000001, got %08x x5=%08x mepc=%08x",
+                   u_ram.mem[28], u_core.u_regfile.regs[5], u_ram.mem[29]);
+        end
+        if (u_ram.mem[29] !== 32'h0000_0020) begin
+            $fatal(1, "expected interrupt mepc to resume at next pc 00000020, got %08x", u_ram.mem[29]);
+        end
+        if (u_ram.mem[30] !== 32'h0000_005a) begin
+            $fatal(1, "expected interrupt-resume handler marker mem[30] = 0000005a, got %08x", u_ram.mem[30]);
         end
 
         u_ram.mem[0]  = 32'h0080_00ef; // jal  ra, main

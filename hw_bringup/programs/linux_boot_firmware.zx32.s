@@ -208,15 +208,19 @@ sbi_console_putchar:
     sw t5, 524(s0)
     sw a0, 544(s0)
     sw s1, 552(s0)
-    lw t0, 256(s0)
+
+console_wait_space:
+    lw t0, 260(s0)
+    lw t2, 256(s0)
+    sub t2, t0, t2
+    li t3, 256
+    bgeu t2, t3, console_wait_space
+
     andi t1, t0, 255
     add t1, s0, t1
     sb a0, 0(t1)
     addi t0, t0, 1
-    sw t0, 256(s0)
-    lw t1, 260(s0)
-    addi t1, t1, 1
-    sw t1, 260(s0)
+    sw t0, 260(s0)
     # Linux boot logs are mirrored through scratch and drained by the PS
     # launcher. Avoid spending one SBI trap per character polling PL UART.
     j return_sbi

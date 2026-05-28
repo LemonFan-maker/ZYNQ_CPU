@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 src="${ZX32_INIT_SRC:-$repo_dir/linux/initramfs/init.S}"
+exec_src="${ZX32_EXEC_SMOKE_SRC:-$repo_dir/linux/initramfs/exec_smoke.S}"
 out_dir="${ZX32_INITRAMFS_OUT:-$repo_dir/build/linux-initramfs}"
 prefix="${CROSS_COMPILE:-}"
 
@@ -24,16 +25,25 @@ mkdir -p "$out_dir"
 
 "${prefix}as" -march=rv32ima_zicsr_zifencei -mabi=ilp32 "$src" -o "$out_dir/init.o"
 "${prefix}ld" -melf32lriscv -nostdlib -static -e _start "$out_dir/init.o" -o "$out_dir/init"
+"${prefix}as" -march=rv32ima_zicsr_zifencei -mabi=ilp32 "$exec_src" -o "$out_dir/exec_smoke.o"
+"${prefix}ld" -melf32lriscv -nostdlib -static -e _start "$out_dir/exec_smoke.o" -o "$out_dir/zx32-exec-smoke"
 
 if command -v "${prefix}strip" >/dev/null 2>&1; then
     "${prefix}strip" "$out_dir/init"
+    "${prefix}strip" "$out_dir/zx32-exec-smoke"
 fi
 
 cat > "$out_dir/initramfs.list" <<EOF
 dir /dev 0755 0 0
+dir /bin 0755 0 0
+dir /proc 0555 0 0
+dir /sys 0555 0 0
 nod /dev/console 0600 0 0 c 5 1
 file /init $out_dir/init 0755 0 0
+file /bin/zx32-exec-smoke $out_dir/zx32-exec-smoke 0755 0 0
+slink /bin/zx32-link /bin/zx32-exec-smoke 0777 0 0
 EOF
 
 echo "Initramfs list: $out_dir/initramfs.list"
 echo "Init binary: $out_dir/init"
+echo "Exec smoke binary: $out_dir/zx32-exec-smoke"
