@@ -9,6 +9,7 @@ base_config="${LINUX_BASE_CONFIG:-allnoconfig}"
 riscv_march="${ZX32_RISCV_MARCH:-rv32ima_zicsr_zifencei}"
 jobs="${JOBS:-$(nproc)}"
 initramfs_list="${LINUX_INITRAMFS_SOURCE:-}"
+buildroot_cpio="${ZX32_BUILDROOT_CPIO:-$repo_dir/build/buildroot-zx32/images/rootfs.cpio}"
 
 if [[ ! -d "$linux_src" ]]; then
     echo "Linux source not found: $linux_src" >&2
@@ -34,9 +35,13 @@ fi
 mkdir -p "$linux_out"
 
 config_fragment="$fragment"
-if [[ "${ZX32_INITRAMFS:-1}" != "0" ]]; then
-    "$repo_dir/scripts/build_zx32_initramfs.sh"
-    initramfs_list="${initramfs_list:-$repo_dir/build/linux-initramfs/initramfs.list}"
+if [[ "${ZX32_INITRAMFS:-1}" != "0" && -z "$initramfs_list" ]]; then
+    if [[ ! -f "$buildroot_cpio" ]]; then
+        echo "No initramfs selected and Buildroot rootfs not found: $buildroot_cpio" >&2
+        echo "Run scripts/build_zx32_busybox_rootfs.sh, set LINUX_INITRAMFS_SOURCE, or set ZX32_INITRAMFS=0." >&2
+        exit 2
+    fi
+    initramfs_list="$buildroot_cpio"
 fi
 
 if [[ -n "$initramfs_list" ]]; then

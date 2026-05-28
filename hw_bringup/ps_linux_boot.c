@@ -3,6 +3,8 @@
 #include "xil_cache.h"
 #include "xil_io.h"
 #include "xil_printf.h"
+#include "bspconfig.h"
+#include "xuartps_hw.h"
 #include "zx32_programs.h"
 
 #ifndef ZX32_LINUX_BOOT_TRACE
@@ -250,6 +252,34 @@ static int print_linux_console_mirror(u32 *last_total, int *started)
     return idle_seen;
 }
 
+static void pump_linux_console_input(void)
+{
+    u32 head = Xil_In32(CPU_LINUX_CONSOLE_IN_RING_HEAD);
+    u32 tail = Xil_In32(CPU_LINUX_CONSOLE_IN_RING_TAIL);
+
+    while ((tail - head) < CPU_LINUX_CONSOLE_IN_RING_BYTES &&
+           XUartPs_IsReceiveData(STDIN_BASEADDRESS)) {
+        u8 ch = XUartPs_RecvByte(STDIN_BASEADDRESS);
+        u32 idx = tail & (CPU_LINUX_CONSOLE_IN_RING_BYTES - 1U);
+        u32 addr = CPU_LINUX_CONSOLE_IN_RING_BASE + (idx & ~3U);
+        u32 shift = (idx & 3U) * 8U;
+        u32 word = Xil_In32(addr);
+
+        word &= ~(0xffU << shift);
+        word |= ((u32)ch << shift);
+        Xil_Out32(addr, word);
+        tail++;
+        Xil_Out32(CPU_LINUX_CONSOLE_IN_RING_TAIL, tail);
+    }
+
+    if (Xil_In32(CPU_LINUX_CONSOLE_IN_VALID) == 0U &&
+        XUartPs_IsReceiveData(STDIN_BASEADDRESS)) {
+        u8 ch = XUartPs_RecvByte(STDIN_BASEADDRESS);
+        Xil_Out32(CPU_LINUX_CONSOLE_IN_CHAR, (u32)ch);
+        Xil_Out32(CPU_LINUX_CONSOLE_IN_VALID, 1U);
+    }
+}
+
 static void clear_linux_console_mirror(void)
 {
     for (u32 i = 0U; i < CPU_LINUX_CONSOLE_RING_WORDS; i++) {
@@ -257,6 +287,13 @@ static void clear_linux_console_mirror(void)
     }
     Xil_Out32(CPU_LINUX_CONSOLE_RING_HEAD, 0U);
     Xil_Out32(CPU_LINUX_CONSOLE_RING_TOTAL, 0U);
+    Xil_Out32(CPU_LINUX_CONSOLE_IN_CHAR, 0U);
+    Xil_Out32(CPU_LINUX_CONSOLE_IN_VALID, 0U);
+    for (u32 i = 0U; i < (CPU_LINUX_CONSOLE_IN_RING_BYTES / 4U); i++) {
+        Xil_Out32(CPU_LINUX_CONSOLE_IN_RING_BASE + i * 4U, 0U);
+    }
+    Xil_Out32(CPU_LINUX_CONSOLE_IN_RING_HEAD, 0U);
+    Xil_Out32(CPU_LINUX_CONSOLE_IN_RING_TAIL, 0U);
 }
 
 static void clear_linux_sbi_counters(void)
@@ -442,6 +479,8 @@ int main(void)
         u32 unsupported_count = Xil_In32(CPU_LINUX_UNSUPPORTED_COUNT);
         u32 trap_count = Xil_In32(CPU_LINUX_TRAP_COUNT);
 
+        pump_linux_console_input();
+
         if (print_linux_console_mirror(&last_console_total, &linux_console_started) != 0 &&
             userspace_idle_seen == 0) {
             userspace_idle_seen = 1;
@@ -552,6 +591,9 @@ int main(void)
 
         if (report_count < boot_watchdog_reports) {
             for (volatile u32 delay = 0U; delay < 200000U; delay++) {
+                if ((delay & 0x3ffU) == 0U) {
+                    pump_linux_console_input();
+                }
             }
             report_count++;
             if (report_count == boot_watchdog_reports) {
@@ -571,6 +613,9 @@ int main(void)
             }
         } else {
             for (volatile u32 delay = 0U; delay < 200000U; delay++) {
+                if ((delay & 0x3ffU) == 0U) {
+                    pump_linux_console_input();
+                }
             }
         }
     }

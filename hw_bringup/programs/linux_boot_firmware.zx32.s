@@ -229,6 +229,25 @@ sbi_console_getchar:
     lw t5, 528(s0)
     addi t5, t5, 1
     sw t5, 528(s0)
+    lw t0, 400(s0)
+    lw t2, 404(s0)
+    beq t0, t2, sbi_console_getchar_legacy
+    andi t1, t0, 127
+    addi t1, t1, 272
+    add t1, s0, t1
+    lbu a0, 0(t1)
+    addi t0, t0, 1
+    sw t0, 400(s0)
+    j return_sbi
+
+sbi_console_getchar_legacy:
+    lw t0, 268(s0)
+    beq t0, x0, sbi_console_getchar_empty
+    lw a0, 264(s0)
+    sw x0, 268(s0)
+    j return_sbi
+
+sbi_console_getchar_empty:
     li a0, -1
     j return_sbi
 
