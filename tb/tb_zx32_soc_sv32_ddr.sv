@@ -88,6 +88,12 @@ module tb_zx32_soc_sv32_ddr;
     logic [31:0] wdata_q;
     logic [3:0]  wstrb_q;
     logic        w_seen_q;
+    logic [31:0] araddr_q;
+    logic [7:0]  arlen_q;
+    logic [7:0]  rbeat_q;
+    logic        rburst_active_q;
+    logic [31:0] burst_read_count;
+    logic [7:0]  max_arlen_seen;
 
     initial clk = 1'b0;
     always #5 clk = ~clk;
@@ -166,12 +172,12 @@ module tb_zx32_soc_sv32_ddr;
 
     assign M_AXI_DDR_AWREADY = 1'b1;
     assign M_AXI_DDR_WREADY = 1'b1;
-    assign M_AXI_DDR_ARREADY = !M_AXI_DDR_RVALID;
+    assign M_AXI_DDR_ARREADY = !M_AXI_DDR_RVALID && !rburst_active_q;
     assign M_AXI_DDR_BID = 4'd0;
     assign M_AXI_DDR_BRESP = 2'd0;
     assign M_AXI_DDR_RID = 4'd0;
     assign M_AXI_DDR_RRESP = 2'd0;
-    assign M_AXI_DDR_RLAST = M_AXI_DDR_RVALID;
+    assign M_AXI_DDR_RLAST = M_AXI_DDR_RVALID && (rbeat_q == arlen_q);
 
     task automatic host_write(input logic [31:0] addr, input logic [31:0] data);
         begin
@@ -254,12 +260,25 @@ module tb_zx32_soc_sv32_ddr;
             wdata_q <= 32'd0;
             wstrb_q <= 4'd0;
             w_seen_q <= 1'b0;
+            araddr_q <= 32'd0;
+            arlen_q <= 8'd0;
+            rbeat_q <= 8'd0;
+            rburst_active_q <= 1'b0;
+            burst_read_count <= 32'd0;
+            max_arlen_seen <= 8'd0;
         end else begin
             if (M_AXI_DDR_BVALID && M_AXI_DDR_BREADY) begin
                 M_AXI_DDR_BVALID <= 1'b0;
             end
             if (M_AXI_DDR_RVALID && M_AXI_DDR_RREADY) begin
-                M_AXI_DDR_RVALID <= 1'b0;
+                if (rbeat_q == arlen_q) begin
+                    M_AXI_DDR_RVALID <= 1'b0;
+                    rburst_active_q <= 1'b0;
+                    rbeat_q <= 8'd0;
+                end else begin
+                    rbeat_q <= rbeat_q + 8'd1;
+                    M_AXI_DDR_RDATA <= ddr_read_word(araddr_q + {22'd0, rbeat_q + 8'd1, 2'b00});
+                end
             end
 
             if (M_AXI_DDR_AWVALID && M_AXI_DDR_AWREADY) begin
@@ -284,6 +303,16 @@ module tb_zx32_soc_sv32_ddr;
             end
 
             if (M_AXI_DDR_ARVALID && M_AXI_DDR_ARREADY) begin
+                araddr_q <= M_AXI_DDR_ARADDR;
+                arlen_q <= M_AXI_DDR_ARLEN;
+                rbeat_q <= 8'd0;
+                rburst_active_q <= 1'b1;
+                if (M_AXI_DDR_ARLEN != 8'd0) begin
+                    burst_read_count <= burst_read_count + 32'd1;
+                end
+                if (M_AXI_DDR_ARLEN > max_arlen_seen) begin
+                    max_arlen_seen <= M_AXI_DDR_ARLEN;
+                end
                 M_AXI_DDR_RDATA <= ddr_read_word(M_AXI_DDR_ARADDR);
                 M_AXI_DDR_RVALID <= 1'b1;
             end
@@ -386,6 +415,9 @@ module tb_zx32_soc_sv32_ddr;
         end
         if (icache_hits == 32'd0 || icache_misses == 32'd0) begin
             $fatal(1, "expected DDR I-cache activity hits=%0d misses=%0d", icache_hits, icache_misses);
+        end
+        if (burst_read_count == 32'd0 || max_arlen_seen !== 8'd3) begin
+            $fatal(1, "expected 4-beat DDR read bursts, count=%0d max_arlen=%0d", burst_read_count, max_arlen_seen);
         end
 
         $display("PASS");

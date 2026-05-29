@@ -87,8 +87,14 @@ module zx32_soc #(
     localparam logic [31:0] IRQ_BASE  = 32'h1004_0000;
     localparam logic [31:0] SCRATCH_BASE = 32'h2000_0000;
     localparam logic [31:0] DDR_BASE     = 32'h8000_0000;
-    localparam int          ICACHE_LINES = 64;
-    localparam int          DCACHE_LINES = 64;
+    localparam int          ICACHE_LINES = 128;
+    localparam int          DCACHE_LINES = 128;
+    localparam int          ICACHE_INDEX_BITS = $clog2(ICACHE_LINES);
+    localparam int          DCACHE_INDEX_BITS = $clog2(DCACHE_LINES);
+    localparam int          ICACHE_TAG_BITS = 32 - ICACHE_INDEX_BITS - 2;
+    localparam int          DCACHE_TAG_BITS = 32 - DCACHE_INDEX_BITS - 2;
+    localparam int          CACHE_LINE_WORDS = 4;
+    localparam logic [2:0]  CACHE_LINE_BEATS = 3'd4;
 
     logic        imem_valid;
     logic [31:0] imem_addr;
@@ -102,13 +108,28 @@ module zx32_soc #(
     logic [3:0]  ddr_req_wstrb;
     logic [31:0] ddr_req_addr;
     logic [31:0] ddr_req_wdata;
+    logic [2:0]  ddr_req_read_beats;
+    logic        ddr_read_beat_valid;
+    logic [2:0]  ddr_read_beat_index;
+    logic [31:0] ddr_read_beat_data;
     logic        imem_ddr_selected;
     logic        imem_ddr_raw_selected;
+    logic        icache_miss_start;
+    logic        icache_miss_valid;
+    logic [ICACHE_INDEX_BITS-1:0] icache_line_base_index;
+    logic [ICACHE_INDEX_BITS-1:0] icache_miss_base_index;
+    logic [ICACHE_TAG_BITS-1:0]   icache_miss_tag;
+    logic [31:0] icache_miss_addr;
+    logic [1:0]  icache_miss_word_offset;
+    logic [31:0] icache_refill_rdata_q;
+    logic [ICACHE_INDEX_BITS-1:0] icache_refill_index;
     logic        icache_hit;
-    logic [5:0]  icache_index;
-    logic [23:0] icache_tag;
+    logic [ICACHE_INDEX_BITS-1:0] icache_index;
+    logic [ICACHE_TAG_BITS-1:0]   icache_tag;
     logic [ICACHE_LINES-1:0] icache_valid;
-    logic [23:0] icache_tags [0:ICACHE_LINES-1];
+    (* ram_style = "distributed" *)
+    logic [ICACHE_TAG_BITS-1:0] icache_tags [0:ICACHE_LINES-1];
+    (* ram_style = "distributed" *)
     logic [31:0] icache_data [0:ICACHE_LINES-1];
     logic        bus_ddr_raw_selected;
     logic        dmem_ddr_raw_selected;
@@ -116,15 +137,22 @@ module zx32_soc #(
     logic        dcache_check_active;
     logic        dcache_lookup_hit;
     logic        dcache_miss_valid;
-    logic [5:0]  dcache_miss_index;
-    logic [23:0] dcache_miss_tag;
+    logic [DCACHE_INDEX_BITS-1:0] dcache_miss_base_index;
+    logic [DCACHE_INDEX_BITS-1:0] dcache_miss_index;
+    logic [DCACHE_TAG_BITS-1:0]   dcache_miss_tag;
     logic [31:0] dcache_miss_addr;
+    logic [1:0]  dcache_miss_word_offset;
+    logic [31:0] dcache_refill_rdata_q;
     logic        dcache_resp_valid;
     logic [31:0] dcache_resp_rdata;
-    logic [5:0]  dcache_index;
-    logic [23:0] dcache_tag;
+    logic [DCACHE_INDEX_BITS-1:0] dcache_index;
+    logic [DCACHE_INDEX_BITS-1:0] dcache_line_base_index;
+    logic [DCACHE_INDEX_BITS-1:0] dcache_refill_index;
+    logic [DCACHE_TAG_BITS-1:0]   dcache_tag;
     logic [DCACHE_LINES-1:0] dcache_valid;
-    logic [23:0] dcache_tags [0:DCACHE_LINES-1];
+    (* ram_style = "distributed" *)
+    logic [DCACHE_TAG_BITS-1:0] dcache_tags [0:DCACHE_LINES-1];
+    (* ram_style = "distributed" *)
     logic [31:0] dcache_data [0:DCACHE_LINES-1];
 
     logic        dmem_valid;
@@ -231,8 +259,9 @@ module zx32_soc #(
     assign bus_ddr_raw_selected = bus_valid && bus_addr[31:28] == 4'h8;
     assign dmem_ddr_raw_selected = !host_valid && bus_ddr_raw_selected;
     assign dmem_ddr_read_selected = dmem_ddr_raw_selected && !bus_we;
-    assign dcache_index = bus_addr[7:2];
-    assign dcache_tag = bus_addr[31:8];
+    assign dcache_index = bus_addr[DCACHE_INDEX_BITS+1:2];
+    assign dcache_line_base_index = {bus_addr[DCACHE_INDEX_BITS+1:4], 2'b00};
+    assign dcache_tag = bus_addr[31:DCACHE_INDEX_BITS+2];
     assign dcache_check_active = dmem_ddr_read_selected &&
                                !dcache_resp_valid &&
                                !dcache_miss_valid;
@@ -242,25 +271,34 @@ module zx32_soc #(
     assign ddr_valid = dcache_miss_valid ||
                        (bus_ddr_raw_selected && !dcache_check_active && !(dmem_ddr_read_selected && dcache_resp_valid));
     assign bram_imem_valid = imem_valid && imem_addr[31:16] == 16'h0000;
-    assign imem_ddr_raw_selected = !bus_ddr_raw_selected && imem_valid && imem_addr[31:28] == 4'h8;
-    assign icache_index = imem_addr[7:2];
-    assign icache_tag = imem_addr[31:8];
+    assign imem_ddr_raw_selected = !bus_ddr_raw_selected && !icache_miss_valid && imem_valid && imem_addr[31:28] == 4'h8;
+    assign icache_index = imem_addr[ICACHE_INDEX_BITS+1:2];
+    assign icache_line_base_index = {imem_addr[ICACHE_INDEX_BITS+1:4], 2'b00};
+    assign icache_tag = imem_addr[31:ICACHE_INDEX_BITS+2];
     assign icache_hit = imem_ddr_raw_selected &&
                         icache_valid[icache_index] &&
                         (icache_tags[icache_index] == icache_tag);
-    assign imem_ddr_selected = imem_ddr_raw_selected && !icache_hit;
+    assign icache_miss_start = imem_ddr_raw_selected && !icache_hit;
+    assign imem_ddr_selected = icache_miss_valid || icache_miss_start;
     assign ddr_req_valid = ddr_valid || imem_ddr_selected;
     assign ddr_req_we = dcache_miss_valid ? 1'b0 : (ddr_valid && bus_we);
     assign ddr_req_wstrb = dcache_miss_valid ? 4'd0 : (ddr_valid ? bus_wstrb : 4'd0);
-    assign ddr_req_addr = dcache_miss_valid ? dcache_miss_addr : (ddr_valid ? bus_addr : imem_addr);
+    assign ddr_req_addr = dcache_miss_valid ? dcache_miss_addr :
+                          ddr_valid ? bus_addr :
+                          icache_miss_valid ? icache_miss_addr :
+                          {imem_addr[31:4], 4'b0000};
     assign ddr_req_wdata = dcache_miss_valid ? 32'd0 : (ddr_valid ? bus_wdata : 32'd0);
+    assign ddr_req_read_beats = (dcache_miss_valid || icache_miss_valid || icache_miss_start) ?
+                                CACHE_LINE_BEATS : 3'd1;
+    assign icache_refill_index = icache_miss_base_index + ddr_read_beat_index[1:0];
+    assign dcache_refill_index = dcache_miss_base_index + ddr_read_beat_index[1:0];
     assign imem_ready = bram_imem_valid ? bram_imem_ready :
                         icache_hit ? 1'b1 :
                         imem_ddr_selected ? ddr_ready :
                         imem_valid;
     assign imem_rdata = bram_imem_valid ? bram_imem_rdata :
                         icache_hit ? icache_data[icache_index] :
-                        imem_ddr_selected ? ddr_rdata :
+                        imem_ddr_selected ? icache_refill_rdata_q :
                         32'd0;
     assign dmem_ready = !host_valid && bus_ready;
     assign dmem_rdata = bus_rdata;
@@ -347,21 +385,22 @@ module zx32_soc #(
             perf_dcache_hits <= 32'd0;
             perf_dcache_misses <= 32'd0;
             icache_valid <= '0;
+            icache_miss_valid <= 1'b0;
+            icache_miss_base_index <= '0;
+            icache_miss_tag <= '0;
+            icache_miss_addr <= 32'd0;
+            icache_miss_word_offset <= 2'd0;
+            icache_refill_rdata_q <= 32'd0;
             dcache_valid <= '0;
             dcache_miss_valid <= 1'b0;
-            dcache_miss_index <= 6'd0;
-            dcache_miss_tag <= 24'd0;
+            dcache_miss_base_index <= '0;
+            dcache_miss_index <= '0;
+            dcache_miss_tag <= '0;
             dcache_miss_addr <= 32'd0;
+            dcache_miss_word_offset <= 2'd0;
+            dcache_refill_rdata_q <= 32'd0;
             dcache_resp_valid <= 1'b0;
             dcache_resp_rdata <= 32'd0;
-            for (int i = 0; i < ICACHE_LINES; i++) begin
-                icache_tags[i] <= 24'd0;
-                icache_data[i] <= 32'd0;
-            end
-            for (int i = 0; i < DCACHE_LINES; i++) begin
-                dcache_tags[i] <= 24'd0;
-                dcache_data[i] <= 32'd0;
-            end
         end else if (ctrl_valid && bus_we) begin
             if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
                 cpu_reset_req <= bus_wdata[0];
@@ -377,6 +416,14 @@ module zx32_soc #(
             if (imem_ddr_raw_selected && icache_hit) begin
                 perf_icache_hits <= perf_icache_hits + 32'd1;
             end
+            if (icache_miss_start) begin
+                icache_miss_valid <= 1'b1;
+                icache_miss_base_index <= icache_line_base_index;
+                icache_miss_tag <= icache_tag;
+                icache_miss_addr <= {imem_addr[31:4], 4'b0000};
+                icache_miss_word_offset <= imem_addr[3:2];
+                icache_refill_rdata_q <= 32'd0;
+            end
             if (dcache_lookup_hit) begin
                 perf_dcache_hits <= perf_dcache_hits + 32'd1;
                 dcache_resp_valid <= 1'b1;
@@ -384,35 +431,50 @@ module zx32_soc #(
             end else if (dcache_check_active) begin
                 perf_dcache_misses <= perf_dcache_misses + 32'd1;
                 dcache_miss_valid <= 1'b1;
+                dcache_miss_base_index <= dcache_line_base_index;
                 dcache_miss_index <= dcache_index;
                 dcache_miss_tag <= dcache_tag;
-                dcache_miss_addr <= bus_addr;
+                dcache_miss_addr <= {bus_addr[31:4], 4'b0000};
+                dcache_miss_word_offset <= bus_addr[3:2];
+                dcache_refill_rdata_q <= 32'd0;
             end else if (dcache_resp_valid && !host_valid && dmem_valid) begin
                 dcache_resp_valid <= 1'b0;
             end
             if (ddr_req_valid && !ddr_ready) begin
                 perf_ddr_wait_cycles <= perf_ddr_wait_cycles + 32'd1;
             end
+            if (ddr_read_beat_valid && icache_miss_valid && !dcache_miss_valid) begin
+                icache_valid[icache_refill_index] <= 1'b1;
+                icache_tags[icache_refill_index] <= icache_miss_tag;
+                icache_data[icache_refill_index] <= ddr_read_beat_data;
+                if (ddr_read_beat_index[1:0] == icache_miss_word_offset) begin
+                    icache_refill_rdata_q <= ddr_read_beat_data;
+                end
+            end
+            if (ddr_read_beat_valid && dcache_miss_valid) begin
+                dcache_valid[dcache_refill_index] <= 1'b1;
+                dcache_tags[dcache_refill_index] <= dcache_miss_tag;
+                dcache_data[dcache_refill_index] <= ddr_read_beat_data;
+                if (ddr_read_beat_index[1:0] == dcache_miss_word_offset) begin
+                    dcache_refill_rdata_q <= ddr_read_beat_data;
+                end
+            end
             if (ddr_req_valid && ddr_ready) begin
-                if (imem_ddr_selected) begin
-                    perf_imem_ddr_reqs <= perf_imem_ddr_reqs + 32'd1;
-                    perf_icache_misses <= perf_icache_misses + 32'd1;
-                    icache_valid[icache_index] <= 1'b1;
-                    icache_tags[icache_index] <= icache_tag;
-                    icache_data[icache_index] <= ddr_rdata;
-                end else if (dcache_miss_valid) begin
+                if (dcache_miss_valid) begin
                     perf_dmem_ddr_reqs <= perf_dmem_ddr_reqs + 32'd1;
                     dcache_miss_valid <= 1'b0;
-                    dcache_valid[dcache_miss_index] <= 1'b1;
-                    dcache_tags[dcache_miss_index] <= dcache_miss_tag;
-                    dcache_data[dcache_miss_index] <= ddr_rdata;
                     dcache_resp_valid <= 1'b1;
-                    dcache_resp_rdata <= ddr_rdata;
+                    dcache_resp_rdata <= dcache_refill_rdata_q;
+                end else if (imem_ddr_selected) begin
+                    perf_imem_ddr_reqs <= perf_imem_ddr_reqs + 32'd1;
+                    perf_icache_misses <= perf_icache_misses + 32'd1;
+                    icache_miss_valid <= 1'b0;
                 end else if (!host_valid) begin
                     perf_dmem_ddr_reqs <= perf_dmem_ddr_reqs + 32'd1;
                 end
                 if (ddr_valid && bus_we) begin
                     icache_valid <= '0;
+                    icache_miss_valid <= 1'b0;
                     dcache_valid <= '0;
                     dcache_miss_valid <= 1'b0;
                     dcache_resp_valid <= 1'b0;
@@ -634,8 +696,12 @@ module zx32_soc #(
         .wstrb(ddr_req_wstrb),
         .addr(ddr_req_addr),
         .wdata(ddr_req_wdata),
+        .read_beats(ddr_req_read_beats),
         .ready(ddr_ready),
         .rdata(ddr_rdata),
+        .read_beat_valid(ddr_read_beat_valid),
+        .read_beat_index(ddr_read_beat_index),
+        .read_beat_data(ddr_read_beat_data),
         .M_AXI_AWID(M_AXI_DDR_AWID),
         .M_AXI_AWADDR(M_AXI_DDR_AWADDR),
         .M_AXI_AWLEN(M_AXI_DDR_AWLEN),
