@@ -37,12 +37,39 @@ fi
 
 overlay_dir="$work_dir/overlay"
 busybox_fragment="$work_dir/busybox-zx32.fragment"
+post_build_script="$work_dir/post-build-zx32.sh"
 mkdir -p "$overlay_dir" "$out_dir"
 
 if [[ "$do_reconfig" != "0" || ! -f "$out_dir/.config" ]]; then
-    # The kernel command line currently uses rdinit=/init. Buildroot's BusyBox init
-    # lives at /sbin/init, so provide the expected entry point in the initramfs.
-    ln -sfn /sbin/init "$overlay_dir/init"
+    rm -f "$overlay_dir/init"
+    cat > "$overlay_dir/init" <<'EOF'
+#!/bin/sh
+mkdir -p /dev /proc /sys
+[ -c /dev/null ] || mknod -m 666 /dev/null c 1 3
+[ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5
+[ -c /dev/console ] || mknod -m 600 /dev/console c 5 1
+[ -c /dev/hvc0 ] || mknod -m 600 /dev/hvc0 c 229 0
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+[ -c /dev/null ] || mknod -m 666 /dev/null c 1 3
+[ -c /dev/zero ] || mknod -m 666 /dev/zero c 1 5
+[ -c /dev/console ] || mknod -m 600 /dev/console c 5 1
+[ -c /dev/hvc0 ] || mknod -m 600 /dev/hvc0 c 229 0
+exec /sbin/init "$@"
+EOF
+    chmod +x "$overlay_dir/init"
+
+    cat > "$post_build_script" <<'EOF'
+#!/bin/sh
+set -eu
+
+target_dir="$1"
+
+# The generated rootfs does not ship any sysctl configuration. On zx32 the
+# generic sysctl init script can still run during boot and pollute the console
+# with a user-space segfault, so remove the empty service from this image.
+rm -f "$target_dir/etc/init.d/S02sysctl"
+EOF
+    chmod +x "$post_build_script"
 
     cat > "$busybox_fragment" <<'EOF'
 CONFIG_STATIC=y
@@ -53,6 +80,7 @@ CONFIG_FEATURE_EDITING=y
 CONFIG_FEATURE_EDITING_HISTORY=64
 CONFIG_FEATURE_VI=y
 CONFIG_MOUNT=y
+CONFIG_MKNOD=y
 CONFIG_UMOUNT=y
 CONFIG_DMESG=y
 CONFIG_PS=y
@@ -101,6 +129,7 @@ BR2_TARGET_GENERIC_GETTY_TERM="linux"
 BR2_TARGET_GENERIC_GETTY_OPTIONS="-L"
 BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW=y
 BR2_ROOTFS_OVERLAY="$overlay_dir"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$post_build_script"
 
 BR2_TARGET_ROOTFS_CPIO=y
 BR2_TARGET_ROOTFS_CPIO_FULL=y

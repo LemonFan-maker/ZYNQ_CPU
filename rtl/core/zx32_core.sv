@@ -31,7 +31,15 @@ module zx32_core (
     output logic [31:0] dbg_req_paddr,
     output logic [31:0] dbg_ptw_pte_addr,
     output logic [31:0] dbg_ptw_l1_pte,
-    output logic [31:0] dbg_ptw_l0_pte
+    output logic [31:0] dbg_ptw_l0_pte,
+    output logic [31:0] dbg_mcycle_lo,
+    output logic [31:0] dbg_mcycle_hi,
+    output logic [31:0] dbg_minstret_lo,
+    output logic [31:0] dbg_minstret_hi,
+    output logic [31:0] dbg_wfi_cycles_lo,
+    output logic [31:0] dbg_wfi_cycles_hi,
+    output logic [31:0] dbg_fetch_wait_cycles,
+    output logic [31:0] dbg_dmem_wait_cycles
 );
     localparam logic [31:0] DM_BASE            = 32'h1002_0000;
     localparam logic [31:0] DM_CTRL            = DM_BASE + 32'h0000;
@@ -109,7 +117,6 @@ module zx32_core (
     localparam logic [31:0] MCAUSE_STORE_PAGE_FAULT = 32'd15;
     localparam logic [31:0] MCAUSE_INTERRUPT    = 32'h8000_0000;
     localparam int          TLB_ENTRIES         = 8;
-
     typedef enum logic [1:0] {
         PRIV_U = 2'b00,
         PRIV_S = 2'b01,
@@ -142,7 +149,8 @@ module zx32_core (
         ST_AMO_CALC,
         ST_AMO_STORE,
         ST_MEMORY,
-        ST_WRITEBACK
+        ST_WRITEBACK,
+        ST_WFI
     } state_t;
 
     state_t state;
@@ -225,7 +233,6 @@ module zx32_core (
     logic [31:0] page_fault_tval;
     logic        page_fault_pending;
     logic        translate_active;
-    logic        system_sfence_vma;
     logic [TLB_ENTRIES-1:0] tlb_valid;
     logic [TLB_ENTRIES-1:0] tlb_global;
     logic [TLB_ENTRIES-1:0] tlb_r;
@@ -287,6 +294,11 @@ module zx32_core (
     logic        system_mret;
     logic        system_sret;
     logic        system_wfi;
+    logic        system_sfence_vma;
+    logic        wfi_timer_wake;
+    logic        wfi_external_wake;
+    logic        wfi_wake;
+    logic        writeback_enter_wfi;
     logic [31:0] trap_cause;
     logic [31:0] trap_tval;
     logic        trap_to_s;
@@ -297,6 +309,9 @@ module zx32_core (
     logic [29:0] lr_reservation_addr;
     logic [63:0] mcycle_counter;
     logic [63:0] minstret_counter;
+    logic [63:0] wfi_cycle_counter;
+    logic [31:0] fetch_wait_counter;
+    logic [31:0] dmem_wait_counter;
 
     function automatic logic [31:0] load_extend(
         input logic [31:0] word,
@@ -632,6 +647,20 @@ module zx32_core (
     assign system_mret = (opcode == OPCODE_SYSTEM) && (funct3 == 3'b000) && (csr_addr == 12'h302);
     assign system_wfi = (opcode == OPCODE_SYSTEM) && (funct3 == 3'b000) && (csr_addr == 12'h105);
     assign system_sfence_vma = (opcode == OPCODE_SYSTEM) && (funct3 == 3'b000) && (funct7 == 7'b0001001);
+    assign wfi_timer_wake = irq_timer &&
+                            (((current_priv != PRIV_M) && csr_mideleg[IRQ_S_TIMER] && csr_sie[IRQ_S_TIMER]) ||
+                             (csr_mie[IRQ_M_TIMER] && (current_priv == PRIV_M || !csr_mideleg[IRQ_S_TIMER])));
+    assign wfi_external_wake = irq_external &&
+                               (((current_priv != PRIV_M) && csr_mideleg[IRQ_S_EXT] && csr_sie[IRQ_S_EXT]) ||
+                                (csr_mie[IRQ_M_EXT] && (current_priv == PRIV_M || !csr_mideleg[IRQ_S_EXT])));
+    assign wfi_wake = irq_timer || irq_external || wfi_timer_wake || wfi_external_wake;
+    assign writeback_enter_wfi = (state == ST_WRITEBACK) &&
+                                 system_wfi &&
+                                 !illegal_instr &&
+                                 !system_ecall &&
+                                 !system_ebreak &&
+                                 !page_fault_pending &&
+                                 (interrupt_cause == 32'd0);
     assign amo_sc_success = lr_reservation_valid &&
                              (lr_reservation_addr == (req_pa_valid ? req_paddr[31:2] : mem_addr_q[31:2]));
     assign op_rs1_data = (state == ST_EXECUTE) ? rs1_data : op_rs1_q;
@@ -693,6 +722,14 @@ module zx32_core (
     assign dbg_ptw_pte_addr = ptw_pte_addr;
     assign dbg_ptw_l1_pte = ptw_l1_pte;
     assign dbg_ptw_l0_pte = ptw_l0_pte;
+    assign dbg_mcycle_lo = mcycle_counter[31:0];
+    assign dbg_mcycle_hi = mcycle_counter[63:32];
+    assign dbg_minstret_lo = minstret_counter[31:0];
+    assign dbg_minstret_hi = minstret_counter[63:32];
+    assign dbg_wfi_cycles_lo = wfi_cycle_counter[31:0];
+    assign dbg_wfi_cycles_hi = wfi_cycle_counter[63:32];
+    assign dbg_fetch_wait_cycles = fetch_wait_counter;
+    assign dbg_dmem_wait_cycles = dmem_wait_counter;
 
     always_comb begin
         tlb_lookup_hit = 1'b0;
@@ -1158,6 +1195,9 @@ module zx32_core (
             csr_mip <= 32'd0;
             mcycle_counter <= 64'd0;
             minstret_counter <= 64'd0;
+            wfi_cycle_counter <= 64'd0;
+            fetch_wait_counter <= 32'd0;
+            dmem_wait_counter <= 32'd0;
             lr_reservation_valid <= 1'b0;
             lr_reservation_addr <= 30'd0;
             tlb_replace_ptr <= 3'd0;
@@ -1177,6 +1217,15 @@ module zx32_core (
             end
         end else begin
             mcycle_counter <= mcycle_counter + 64'd1;
+            if (state == ST_WFI) begin
+                wfi_cycle_counter <= wfi_cycle_counter + 64'd1;
+            end
+            if (imem_valid && !imem_ready) begin
+                fetch_wait_counter <= fetch_wait_counter + 32'd1;
+            end
+            if (dmem_valid && !dmem_ready) begin
+                dmem_wait_counter <= dmem_wait_counter + 32'd1;
+            end
             case (state)
                 ST_RESET: begin
                     pc <= reset_vector;
@@ -1239,8 +1288,8 @@ module zx32_core (
                                 state <= ST_MULDIV;
                             end
                         end else begin
-                            muldiv_result_q <= rv32m_mul_result(funct3, rs1_data, rs2_data);
-                            state <= ST_WRITEBACK;
+                            div_count_q <= 6'd0;
+                            state <= ST_MULDIV;
                         end
                     end else if (amo_supported) begin
                         mem_addr_q <= rs1_data;
@@ -1435,13 +1484,18 @@ module zx32_core (
                     end
                 end
                 ST_MULDIV: begin
-                    div_dividend_q <= div_step_dividend_next;
-                    div_remainder_q <= div_step_rem_next;
-                    div_quotient_q <= div_step_quot_next;
-                    div_count_q <= div_count_q - 6'd1;
-                    if (div_count_q == 6'd1) begin
-                        muldiv_result_q <= div_return_rem_q ? div_step_signed_rem : div_step_signed_quot;
+                    if (div_count_q == 6'd0) begin
+                        muldiv_result_q <= rv32m_mul_result(instr_q[14:12], op_rs1_q, op_rs2_q);
                         state <= ST_WRITEBACK;
+                    end else begin
+                        div_dividend_q <= div_step_dividend_next;
+                        div_remainder_q <= div_step_rem_next;
+                        div_quotient_q <= div_step_quot_next;
+                        div_count_q <= div_count_q - 6'd1;
+                        if (div_count_q == 6'd1) begin
+                            muldiv_result_q <= div_return_rem_q ? div_step_signed_rem : div_step_signed_quot;
+                            state <= ST_WRITEBACK;
+                        end
                     end
                 end
                 ST_AMO_LOAD: begin
@@ -1763,6 +1817,10 @@ module zx32_core (
                             end
                         end
                         pc <= next_pc;
+                    end else if (system_wfi) begin
+                        minstret_counter <= minstret_counter + 64'd1;
+                        pc <= next_pc;
+                        state <= ST_WFI;
                     end else begin
                         minstret_counter <= minstret_counter + 64'd1;
                         if (system_csr && csr_wen) begin
@@ -1798,7 +1856,35 @@ module zx32_core (
                         end
                         pc <= next_pc;
                     end
-                    state <= ST_FETCH;
+                    if (!writeback_enter_wfi) begin
+                        state <= ST_FETCH;
+                    end
+                end
+                ST_WFI: begin
+                    if (wfi_wake) begin
+                        if (interrupt_cause != 32'd0) begin
+                            if (interrupt_to_s) begin
+                                csr_sepc <= pc;
+                                csr_scause <= interrupt_cause;
+                                csr_stval <= 32'd0;
+                                csr_mstatus[5] <= csr_mstatus[1];
+                                csr_mstatus[1] <= 1'b0;
+                                csr_mstatus[8] <= (current_priv == PRIV_S);
+                                current_priv <= PRIV_S;
+                                pc <= {csr_stvec[31:2], 2'b00};
+                            end else if (interrupt_to_m) begin
+                                csr_mepc <= pc;
+                                csr_mcause <= interrupt_cause;
+                                csr_mtval <= 32'd0;
+                                csr_mstatus[7] <= csr_mstatus[3];
+                                csr_mstatus[3] <= 1'b0;
+                                csr_mstatus[12:11] <= current_priv;
+                                current_priv <= PRIV_M;
+                                pc <= {csr_mtvec[31:2], 2'b00};
+                            end
+                        end
+                        state <= ST_FETCH;
+                    end
                 end
                 default: begin
                     state <= ST_RESET;

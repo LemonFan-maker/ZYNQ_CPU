@@ -192,7 +192,6 @@ module tb_zx32_soc_sv32_ddr;
     endtask
 
     task automatic host_read(input logic [31:0] addr, output logic [31:0] data);
-        bit saw_not_ready;
         begin
             @(negedge clk);
             host_addr = addr;
@@ -200,13 +199,9 @@ module tb_zx32_soc_sv32_ddr;
             host_wstrb = 4'd0;
             host_we = 1'b0;
             host_valid = 1'b1;
-            saw_not_ready = 1'b0;
             do begin
                 @(posedge clk);
-                if (host_ready !== 1'b1) begin
-                    saw_not_ready = 1'b1;
-                end
-            end while (!saw_not_ready || host_ready !== 1'b1);
+            end while (host_ready !== 1'b1);
             #1;
             data = host_rdata;
             @(negedge clk);
@@ -300,6 +295,8 @@ module tb_zx32_soc_sv32_ddr;
         logic [31:0] sepc;
         logic [31:0] scause;
         logic [31:0] stval;
+        logic [31:0] icache_hits;
+        logic [31:0] icache_misses;
 
         host_valid = 1'b0;
         host_we = 1'b0;
@@ -377,6 +374,8 @@ module tb_zx32_soc_sv32_ddr;
         host_read(TRAP_MARKER_CPU + 32'd4, sepc);
         host_read(TRAP_MARKER_CPU + 32'd8, scause);
         host_read(TRAP_MARKER_CPU + 32'd12, stval);
+        host_read(CTRL_BASE + 32'hac, icache_hits);
+        host_read(CTRL_BASE + 32'hb0, icache_misses);
 
         if (marker !== 32'h0000_005a || sepc !== 32'h8040_001c ||
             scause !== 32'h0000_000c || stval !== 32'h8040_001c) begin
@@ -384,6 +383,9 @@ module tb_zx32_soc_sv32_ddr;
                    marker, sepc, scause, stval,
                    u_soc.dbg_core_state, u_soc.dbg_pc, u_soc.dbg_satp,
                    u_soc.dbg_ptw_pte_addr, u_soc.dbg_ptw_l1_pte, u_soc.dbg_bus_state);
+        end
+        if (icache_hits == 32'd0 || icache_misses == 32'd0) begin
+            $fatal(1, "expected DDR I-cache activity hits=%0d misses=%0d", icache_hits, icache_misses);
         end
 
         $display("PASS");

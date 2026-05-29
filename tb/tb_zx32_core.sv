@@ -1023,6 +1023,70 @@ module tb_zx32_core;
             $fatal(1, "expected interrupt-resume handler marker mem[30] = 0000005a, got %08x", u_ram.mem[30]);
         end
 
+        u_ram.mem[0]  = 32'h0400_0093; // addi x1, x0, 0x40
+        u_ram.mem[1]  = 32'h3050_9073; // csrw mtvec, x1
+        u_ram.mem[2]  = 32'h0800_0093; // addi x1, x0, 0x80
+        u_ram.mem[3]  = 32'h3040_9073; // csrw mie, x1
+        u_ram.mem[4]  = 32'h0080_0093; // addi x1, x0, 8
+        u_ram.mem[5]  = 32'h3000_9073; // csrw mstatus, x1
+        u_ram.mem[6]  = 32'h1050_0073; // wfi
+        u_ram.mem[7]  = 32'h0010_0293; // addi x5, x0, 1
+        u_ram.mem[8]  = 32'h0850_2023; // sw   x5, 128(x0)
+        u_ram.mem[9]  = 32'h0000_006f; // j    0
+        for (int i = 10; i < 16; i++) begin
+            u_ram.mem[i] = 32'h0000_0000;
+        end
+        u_ram.mem[16] = 32'h3410_2173; // csrr x2, mepc
+        u_ram.mem[17] = 32'h0820_2223; // sw   x2, 132(x0)
+        u_ram.mem[18] = 32'h05a0_0193; // addi x3, x0, 0x5a
+        u_ram.mem[19] = 32'h0830_2423; // sw   x3, 136(x0)
+        u_ram.mem[20] = 32'h3040_1073; // csrw mie, x0
+        u_ram.mem[21] = 32'h3020_0073; // mret
+        u_ram.mem[22] = 32'h0000_0000;
+        u_ram.mem[23] = 32'h0000_0000;
+        u_ram.mem[32] = 32'h0000_0000;
+        u_ram.mem[33] = 32'h0000_0000;
+        u_ram.mem[34] = 32'h0000_0000;
+
+        reset_vector = 32'd0;
+        irq_timer = 1'b0;
+        irq_external = 1'b0;
+        rst_n = 1'b0;
+        repeat (4) @(posedge clk);
+        rst_n = 1'b1;
+
+        repeat (60) @(posedge clk);
+
+        if (u_core.state !== u_core.ST_WFI) begin
+            $fatal(1, "expected core to stop in ST_WFI, state=%0d pc=%08x imem_valid=%0d dmem_valid=%0d",
+                   u_core.state, u_core.pc, imem_valid, dmem_valid);
+        end
+        if (imem_valid || dmem_valid) begin
+            $fatal(1, "expected no memory request during WFI, imem_valid=%0d dmem_valid=%0d",
+                   imem_valid, dmem_valid);
+        end
+        if (u_core.dbg_wfi_cycles_lo == 32'd0) begin
+            $fatal(1, "expected WFI cycle counter to advance");
+        end
+        if (u_ram.mem[32] !== 32'h0000_0000) begin
+            $fatal(1, "expected instruction after WFI not to run before interrupt, mem[32]=%08x", u_ram.mem[32]);
+        end
+
+        irq_timer = 1'b1;
+        repeat (120) @(posedge clk);
+        irq_timer = 1'b0;
+
+        if (u_ram.mem[32] !== 32'h0000_0001) begin
+            $fatal(1, "expected instruction after WFI to run once after interrupt, mem[32]=%08x x5=%08x",
+                   u_ram.mem[32], u_core.u_regfile.regs[5]);
+        end
+        if (u_ram.mem[33] !== 32'h0000_001c) begin
+            $fatal(1, "expected WFI interrupt mepc to be next pc 0000001c, got %08x", u_ram.mem[33]);
+        end
+        if (u_ram.mem[34] !== 32'h0000_005a) begin
+            $fatal(1, "expected WFI interrupt handler marker mem[34] = 0000005a, got %08x", u_ram.mem[34]);
+        end
+
         u_ram.mem[0]  = 32'h0080_00ef; // jal  ra, main
         u_ram.mem[1]  = 32'h04a0_2823; // sw   a0, 80(x0)
         u_ram.mem[2]  = 32'h05a0_0513; // addi a0, x0, 0x5a
