@@ -95,6 +95,7 @@ class Cpu:
         self._tlb_4m_last_key = -1
         self._tlb_4m_last_pbase = 0
         self._decode_cache: dict[int, DecodedInst] = {}
+        self._run_max_steps: int | None = None
         if self.plic is None and self.virtio_blk is not None:
             self.plic = Plic(self.virtio_blk)
 
@@ -488,6 +489,26 @@ class Cpu:
             return False
         return self.priv == 0 or (self._sstatus & SSTATUS_SIE) != 0
 
+    def _timer_wfi_wait_enabled(self) -> bool:
+        # WFI can resume for locally enabled interrupts even when global xIE is clear.
+        if self.priv <= 1:
+            return (
+                (self.csr_read(0x303) & SIP_STIP) != 0
+                and (self.csr_read(0x104) & SIP_STIP) != 0
+            )
+        return (self.csr_read(0x304) & MIP_MTIP) != 0
+
+    def _fast_forward_wfi(self) -> None:
+        if self.mtimecmp == 0 or self.steps >= self.mtimecmp:
+            return
+        if self._external_irq_pending() or not self._timer_wfi_wait_enabled():
+            return
+        target = self.mtimecmp
+        if self._run_max_steps is not None:
+            target = min(target, self._run_max_steps)
+        if target > self.steps + 1:
+            self.steps = target - 1
+
     def step(self) -> StopReason:
         if self._check_interrupt():
             self.steps += 1
@@ -720,7 +741,10 @@ class Cpu:
                 self.sret()
                 return StopReason.RUNNING
             if inst == 0x10500073:
-                return StopReason.WFI if self.stop_on_wfi else StopReason.RUNNING
+                if self.stop_on_wfi:
+                    return StopReason.WFI
+                self._fast_forward_wfi()
+                return StopReason.RUNNING
             if (inst & 0xFE007FFF) == 0x12000073:  # sfence.vma
                 self.flush_tlb()
                 return StopReason.RUNNING
@@ -752,10 +776,15 @@ class Cpu:
         return StopReason.RUNNING
 
     def run(self, max_steps: int, stop_pc: int | None = None) -> StopReason:
-        while self.steps < max_steps:
-            if stop_pc is not None and self.pc == stop_pc:
-                return StopReason.BREAKPOINT
-            reason = self.step()
-            if reason is not StopReason.RUNNING:
-                return reason
-        return StopReason.MAX_STEPS
+        previous_limit = self._run_max_steps
+        self._run_max_steps = max_steps
+        try:
+            while self.steps < max_steps:
+                if stop_pc is not None and self.pc == stop_pc:
+                    return StopReason.BREAKPOINT
+                reason = self.step()
+                if reason is not StopReason.RUNNING:
+                    return reason
+            return StopReason.MAX_STEPS
+        finally:
+            self._run_max_steps = previous_limit

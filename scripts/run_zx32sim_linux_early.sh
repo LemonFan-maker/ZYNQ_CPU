@@ -7,9 +7,22 @@ image="$repo_dir/build/linux-mainline-rv32/arch/riscv/boot/Image"
 dtb="$repo_dir/build/linux/zynq_cpu.dtb"
 sim_dtb="$repo_dir/build/linux/zx32sim_virtio.dtb"
 system_map="$repo_dir/build/linux-mainline-rv32/System.map"
-steps="${ZX32SIM_LINUX_STEPS:-200000}"
-stop_check_interval="${ZX32SIM_STOP_CHECK_INTERVAL:-10000}"
+interactive="${ZX32SIM_INTERACTIVE:-0}"
+if [[ "$interactive" == "0" ]]; then
+    steps="${ZX32SIM_LINUX_STEPS:-150000000}"
+else
+    steps="${ZX32SIM_LINUX_STEPS:-1000000000000}"
+fi
+stop_check_interval="${ZX32SIM_STOP_CHECK_INTERVAL:-1000000}"
 block_image="${ZX32SIM_VIRTIO_BLOCK_IMAGE:-}"
+console_input="${ZX32SIM_CONSOLE_INPUT:-}"
+console_input_file="${ZX32SIM_CONSOLE_INPUT_FILE:-}"
+console_script="${ZX32SIM_CONSOLE_SCRIPT:-}"
+if [[ "$interactive" == "0" ]]; then
+    stop_console="${ZX32SIM_STOP_CONSOLE:-buildroot login:}"
+else
+    stop_console="${ZX32SIM_STOP_CONSOLE:-}"
+fi
 
 if [[ ! -f "$firmware" ]]; then
     python3 "$repo_dir/tools/zx32elf.py" \
@@ -53,8 +66,27 @@ cmd=(python3 -m tools.zx32sim.main "$firmware"
     --dump-word 0x20010200
     --dump-console-ring
     --continue-on-wfi
-    --stop-console "buildroot login:"
     --stop-check-interval "$stop_check_interval")
+
+if [[ -n "$stop_console" ]]; then
+    cmd+=(--stop-console "$stop_console")
+fi
+
+if [[ "$interactive" != "0" ]]; then
+    cmd+=(--interactive-console)
+fi
+
+if [[ -n "$console_input" ]]; then
+    cmd+=(--console-input "$console_input")
+fi
+
+if [[ -n "$console_input_file" ]]; then
+    cmd+=(--console-input-file "$console_input_file")
+fi
+
+if [[ -n "$console_script" ]]; then
+    cmd+=(--console-script "$console_script")
+fi
 
 if [[ -n "$block_image" ]]; then
     cmd+=(--virtio-block-image "$block_image")

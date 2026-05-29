@@ -39,7 +39,7 @@ from zx32sim.block import (
     BLOCK_DEVICE_BASE,
 )
 from zx32sim.elf import load_elf
-from zx32sim.main import main as sim_main, read_console_ring, run_with_cli_stops
+from zx32sim.main import ConsoleSend, drain_console_ring, load_console_script, main as sim_main, read_console_ring, run_with_cli_stops, write_console_input
 from zx32sim.memory import Memory
 from zx32sim.virtio import VIRTIO_MMIO_BASE, VirtioMmioBlockDevice
 
@@ -146,6 +146,20 @@ class ZX32SimTests(unittest.TestCase):
         self.assertEqual(cpu.priv, 1)
         self.assertEqual(cpu.pc, 0x100)
         self.assertEqual(cpu.csr_read(0x142), 0x80000005)
+
+    def test_continue_on_wfi_fast_forwards_to_timer(self) -> None:
+        cpu = Cpu(mem=Memory(), pc=0x40, stop_on_wfi=False)
+        cpu.mem.write_u32(0x40, 0x10500073)
+        cpu.priv = 1
+        cpu.mtimecmp = 1000
+        cpu.csr_write(0x104, 0x20)
+        cpu.csr_write(0x303, 0x20)
+
+        reason = cpu.step()
+
+        self.assertEqual(reason, StopReason.RUNNING)
+        self.assertEqual(cpu.steps, 1000)
+        self.assertEqual(cpu.pc, 0x44)
 
     def test_supervisor_ecall_delegation(self) -> None:
         _cpu, mem, reason = self.run_source(
@@ -574,7 +588,9 @@ class ZX32SimTests(unittest.TestCase):
             stop_nonzero=[],
             stop_change=[],
             stop_console=[],
+            console_sends=[],
             console_ring_base=0x20010000,
+            console_ring_head=0x20010100,
             console_ring_total=0x20010104,
             console_ring_bytes=256,
             checkpoint_interval=None,
@@ -603,6 +619,46 @@ class ZX32SimTests(unittest.TestCase):
         self.assertEqual(total, len(text))
         self.assertEqual(captured, "cdef")
 
+    def test_console_ring_drain_advances_head(self) -> None:
+        mem = Memory()
+        base = 0x20010000
+        head_addr = 0x20010100
+        total_addr = 0x20010104
+        for pos, byte in enumerate(b"abc"):
+            idx = pos & 0xFF
+            addr = base + (idx & ~3)
+            word = mem.read_u32(addr)
+            shift = (idx & 3) * 8
+            word = (word & ~(0xFF << shift)) | (byte << shift)
+            mem.write_u32(addr, word)
+        mem.write_u32(total_addr, 3)
+
+        self.assertEqual(drain_console_ring(mem, base, head_addr, total_addr, 256), "abc")
+        self.assertEqual(mem.read_u32(head_addr), 3)
+
+    def test_console_input_preloads_getchar_ring(self) -> None:
+        mem = Memory()
+        write_console_input(mem, b"root\n")
+
+        self.assertEqual(mem.read_u32(0x20010190), 0)
+        self.assertEqual(mem.read_u32(0x20010194), 5)
+        self.assertEqual(mem.read_bytes(0x20010110, 5), b"root\n")
+
+    def test_console_input_rejects_overflow(self) -> None:
+        mem = Memory()
+        with self.assertRaises(ValueError):
+            write_console_input(mem, b"x" * 129)
+
+    def test_console_script_allows_shell_prompt_trigger(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "console.script"
+            path.write_text("# comment\n# \tuname -a\\n\n", encoding="utf-8")
+            sends = load_console_script(path)
+
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0].needle, "# ")
+        self.assertEqual(sends[0].data, b"uname -a\n")
+
     def test_cli_stop_console_breaks_when_ring_contains_text(self) -> None:
         mem = Memory()
         base = 0x20010000
@@ -627,7 +683,9 @@ class ZX32SimTests(unittest.TestCase):
             stop_nonzero=[],
             stop_change=[],
             stop_console=["buildroot login:"],
+            console_sends=[],
             console_ring_base=base,
+            console_ring_head=0x20010100,
             console_ring_total=total_addr,
             console_ring_bytes=256,
             checkpoint_interval=None,
@@ -637,6 +695,45 @@ class ZX32SimTests(unittest.TestCase):
         )
 
         self.assertEqual(reason, StopReason.BREAKPOINT)
+
+    def test_cli_console_send_after_writes_input_ring(self) -> None:
+        mem = Memory()
+        base = 0x20010000
+        total_addr = 0x20010104
+        text = b"buildroot login: "
+        for pos, byte in enumerate(text):
+            idx = pos & 0xFF
+            addr = base + (idx & ~3)
+            word = mem.read_u32(addr)
+            shift = (idx & 3) * 8
+            word = (word & ~(0xFF << shift)) | (byte << shift)
+            mem.write_u32(addr, word)
+        mem.write_u32(total_addr, len(text))
+        cpu = Cpu(mem=mem)
+
+        reason = run_with_cli_stops(
+            cpu=cpu,
+            mem=mem,
+            max_steps=20,
+            stop_pc=None,
+            stop_words=[],
+            stop_nonzero=[],
+            stop_change=[],
+            stop_console=["buildroot login:"],
+            console_sends=[ConsoleSend("buildroot login:", b"root\n")],
+            console_ring_base=base,
+            console_ring_head=0x20010100,
+            console_ring_total=total_addr,
+            console_ring_bytes=256,
+            checkpoint_interval=None,
+            checkpoint_words=[],
+            symbols=None,
+            event_out=StringIO(),
+        )
+
+        self.assertEqual(reason, StopReason.BREAKPOINT)
+        self.assertEqual(mem.read_bytes(0x20010110, 5), b"root\n")
+        self.assertEqual(mem.read_u32(0x20010194), 5)
 
 
 if __name__ == "__main__":
