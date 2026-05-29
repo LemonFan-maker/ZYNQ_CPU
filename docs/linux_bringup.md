@@ -105,6 +105,31 @@ After logging in as `root`, basic interactive commands should work:
 
 The PS launcher is intentionally quiet in the normal path; detailed boot monitor and core state dumps should be enabled only for diagnosis.
 
+## Simulator Verification
+
+The same Linux Image, DTB, and M-mode firmware can run in the functional simulator without a board:
+
+```sh
+./scripts/run_zx32sim_linux_early.sh
+```
+
+That command stops when the simulated SBI console reaches `buildroot login:`.
+
+For a live shell:
+
+```sh
+ZX32SIM_INTERACTIVE=1 ./scripts/run_zx32sim_linux_early.sh
+```
+
+The simulator bridges host stdin/stdout to the same scratch-backed SBI console input/output rings used by the board PS launcher. 
+
+This makes it useful for software debugging and repeatable command-output checks, but it is still a functional model rather than hardware proof. 
+
+Board logs remain the final source of truth for RTL timing, AXI behavior, and PS/PL integration.
+
+For scripted login tests and simulator-specific block devices, see
+`docs/simulator.md`.
+
 ## Source Files
 
 | File | Purpose |
@@ -113,12 +138,15 @@ The PS launcher is intentionally quiet in the normal path; detailed boot monitor
 | `hw_bringup/programs/linux_boot_firmware.zx32.s` | local M-mode SBI firmware |
 | `hw_bringup/download_zynq_cpu_linux_boot.xsbl` | XSCT entry for the real Linux boot run |
 | `linux/zynq_cpu.dts` | DTB source for the current custom platform |
+| `linux/zx32sim_virtio.dts` | simulator-only DTB variant with PLIC and virtio block |
 | `linux/zx32_rv32.config` | minimal RV32 Linux config fragment |
 | `scripts/prepare_mainline_linux.sh` | fetch/prepare Linux source tree |
 | `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 kernel Image |
 | `scripts/prepare_linux_boot_artifacts.sh` | build DTB and validate Image/DTB placement |
 | `scripts/build_ps_uart_probe.sh` | build both PS probe launchers and generated payloads |
+| `scripts/run_zx32sim_linux_early.sh` | run the Linux path in the simulator |
+| `tools/zx32sim/` | Python functional simulator |
 
 ## Commands
 

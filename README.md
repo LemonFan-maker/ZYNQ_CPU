@@ -56,7 +56,9 @@ The current Linux path is intentionally simple:
 - the local M-mode firmware implements only the SBI pieces needed by this board path;
 - production device drivers and a stable platform ABI are not present yet.
 
-The next Linux work is to make this Buildroot environment repeatable, reduce console input latency, and clean up the SBI/platform contracts.
+The same Image/DTB/firmware path can also run in the Python functional simulator under `tools/zx32sim/`. The simulator now reaches the Buildroot login prompt, supports scripted expect/send console tests, supports live interactive stdin/stdout console bridging, and includes simulator-only block-device models for software bring-up without a board.
+
+The next Linux work is to make this Buildroot environment repeatable on both board and simulator, reduce board console input latency, and clean up the SBI/platform contracts.
 
 ## Target Board
 
@@ -76,6 +78,7 @@ The next Linux work is to make this Buildroot environment repeatable, reduce con
 | `rtl/soc/` | PL CPU SoC wrapper |
 | `tb/` | Icarus Verilog/SystemVerilog testbenches |
 | `tools/` | ZX32 assembler, ELF packer, and unit tests |
+| `tools/zx32sim/` | Python functional simulator for ISA, SBI, Linux, and device-model bring-up |
 | `hw_bringup/` | PS UART probe and PL CPU assembly smoke programs |
 | `linux/` | Linux DTS and config fragment |
 | `docs/linux_*.md` | Linux boot layout and bring-up contract notes |
@@ -90,6 +93,20 @@ Run software and RTL simulation tests:
 ```sh
 ./scripts/run_all_tests.sh
 ```
+
+Run the ZX32 functional simulator to the Buildroot login prompt:
+
+```sh
+./scripts/run_zx32sim_linux_early.sh
+```
+
+Run the same Linux path with a live interactive console:
+
+```sh
+ZX32SIM_INTERACTIVE=1 ./scripts/run_zx32sim_linux_early.sh
+```
+
+At `buildroot login:`, enter `root`; the default root password is empty. Use `Ctrl-C` to stop the simulator.
 
 Run only one Icarus target:
 
@@ -162,6 +179,7 @@ Do not rely on an already-configured interactive shell when adding project autom
 - `docs/isa.md`: supported ISA subset, custom instructions, and toolchain notes
 - `docs/toolchain.md`: local tools and command entry points
 - `docs/synthesis_status.md`: current synthesis/implementation snapshots
+- `docs/simulator.md`: ZX32 functional simulator usage, console model, and limitations
 - `docs/roadmap.md`: completed Linux milestone and remaining platform work
 - `docs/linux_bringup.md`: current Linux boot flow, evidence, and limitations
 - `docs/linux_boot_layout.md`: actual firmware/kernel/DTB/initramfs placement

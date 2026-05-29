@@ -21,6 +21,8 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `scripts/run_all_tests.sh` | run Python tool tests and all Icarus RTL tests |
 | `scripts/run_iverilog_tests.sh` | run `core`, `irqctrl`, `scratchpad`, `soc`, or `all` Icarus tests |
 | `scripts/run_zx32_toolchain_tests.sh` | run assembler and ELF unit tests |
+| `scripts/run_zx32sim_smokes.sh` | run ZX32 functional simulator smoke tests |
+| `scripts/run_zx32sim_linux_early.sh` | boot the Linux Image/DTB/SBI firmware in the functional simulator |
 | `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
@@ -40,6 +42,8 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `tools/bin2c.py` | convert ELF binaries into C arrays |
 | `tools/test_zx32asm.py` | assembler unit tests |
 | `tools/test_zx32elf.py` | ELF packer unit tests |
+| `tools/zx32sim/` | Python functional simulator for RV32 ISA, traps, Sv32, SBI, Linux, and simple devices |
+| `tools/test_zx32sim.py` | simulator unit tests |
 
 ## Test Commands
 
@@ -62,6 +66,12 @@ Run only Python toolchain tests:
 
 ```sh
 ./scripts/run_zx32_toolchain_tests.sh
+```
+
+Run simulator-only smoke tests:
+
+```sh
+./scripts/run_zx32sim_smokes.sh
 ```
 
 Icarus currently prints warnings like:
@@ -99,6 +109,48 @@ Prepare and build the current Linux boot artifacts:
 `build/buildroot-zx32/images/rootfs.cpio` by default. Set
 `LINUX_INITRAMFS_SOURCE` to point at another initramfs, or set
 `ZX32_INITRAMFS=0` to build without an embedded initramfs.
+
+## Simulator Run Commands
+
+Boot the current Linux artifacts in the functional simulator and stop when the Buildroot login prompt appears:
+
+```sh
+./scripts/run_zx32sim_linux_early.sh
+```
+
+Run the same path with live terminal input/output:
+
+```sh
+ZX32SIM_INTERACTIVE=1 ./scripts/run_zx32sim_linux_early.sh
+```
+
+At the prompt, log in as `root` with an empty password. Stop the simulator with
+`Ctrl-C`.
+
+Run a repeatable scripted login and command sequence:
+
+```sh
+printf 'buildroot login:\troot\\n\n# \tuname -a\\nhostname\\necho ZX32SIM_DONE\\n\n' \
+  > /tmp/zx32sim-console-script
+
+ZX32SIM_CONSOLE_SCRIPT=/tmp/zx32sim-console-script \
+ZX32SIM_STOP_CONSOLE=ZX32SIM_DONE \
+ZX32SIM_LINUX_STEPS=600000000 \
+./scripts/run_zx32sim_linux_early.sh
+```
+
+Attach a simulator virtio block image:
+
+```sh
+truncate -s 16M /tmp/zx32sim-sd.img
+
+ZX32SIM_VIRTIO_BLOCK_IMAGE=/tmp/zx32sim-sd.img \
+./scripts/run_zx32sim_linux_early.sh
+```
+
+The virtio path uses `build/linux/zx32sim_virtio.dtb`, generated from `linux/zx32sim_virtio.dts` by `scripts/prepare_linux_boot_artifacts.sh`. 
+
+See `docs/simulator.md` for the full simulator console and device model.
 
 Run RTL-only Vivado synthesis:
 
@@ -144,6 +196,7 @@ Common generated outputs:
 - `build/linux-mainline-rv32/`
 - `build/buildroot-zx32/`
 - `build/linux/`
+- `build/zx32sim-smokes/`
 - `build/vivado_hw/`
 - `build/vivado_synth/`
 

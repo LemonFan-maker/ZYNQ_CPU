@@ -32,6 +32,11 @@ These are already represented in code, tests, or board logs:
 - mainline RV32 Linux reaches `Run /init as init process`
 - embedded Buildroot rootfs starts syslogd, klogd, sysctl, network setup, crond, and getty
 - interactive login over `hvc0` works through the PS/SBI console bridge
+- Python functional simulator boots the same Linux Image/DTB/SBI firmware to `buildroot login:`
+- simulator live console supports `root` login and BusyBox shell commands through the scratch SBI console path
+- simulator expect/send console scripts support repeatable login and command-output checks
+- simulator virtio-mmio block model and simulator-only DTB exist for disk experiments
+- simulator WFI/timer fast-forward keeps Linux idle runs practical
 - Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
 
 ## Current Development Stage
@@ -63,11 +68,17 @@ Source-of-truth files:
 
 - `docs/linux_bringup.md`
 - `docs/linux_boot_layout.md`
+- `docs/simulator.md`
 - `linux/zynq_cpu.dts`
+- `linux/zx32sim_virtio.dts`
 - `linux/zx32_rv32.config`
 - `hw_bringup/ps_linux_boot.c`
 - `hw_bringup/programs/linux_boot_firmware.zx32.s`
 - `hw_bringup/download_zynq_cpu_linux_boot.xsbl`
+- `tools/zx32sim/`
+- `tools/test_zx32sim.py`
+- `scripts/run_zx32sim_linux_early.sh`
+- `scripts/run_zx32sim_smokes.sh`
 
 Generated artifacts:
 
@@ -86,6 +97,8 @@ Goal: make the current Linux boot and login path easy to rerun and compare.
 Required work:
 
 - keep the final success condition as `Welcome to Buildroot` followed by `buildroot login:`
+- keep the simulator success condition aligned with the board success condition
+- keep one scripted simulator login test that runs `uname -a`, `hostname`, and a marker command
 - keep the PS launcher quiet by default and gate noisy periodic monitor samples
 - keep a compact expected-log section in `docs/hardware_uart_test.md`
 - record the exact Image/DTB addresses through `build/linux/boot_artifacts.env`
@@ -101,6 +114,20 @@ Required work:
 - keep the scratch-ring overflow behavior explicit and observable
 - decide whether `hvc0` remains the primary console or becomes only an early-console path
 - validate repeated login shell commands, line editing, and long input bursts
+- decide whether the simulator should add terminal raw-mode support for character-at-a-time line editing tests
+
+## Next Milestone: Simulator as a Software Debug Target
+
+Goal: make software/debug workflows possible without a board while keeping board behavior as the final authority.
+
+Required work:
+
+- keep `docs/simulator.md` synchronized with CLI flags and runner environment variables
+- add regression coverage for interactive console scripts that compare expected shell output
+- add optional larger simulator-only memory DTB once Linux/rootfs experiments need more RAM
+- define whether simulator-only devices live permanently in `zx32sim_virtio.dts` or move to separate DTB variants
+- add enough tracing around traps, page faults, and SBI calls to debug Linux failures without noisy default output
+- keep Python simulator behavior as the reference model if a faster Rust/C/C++ core is introduced later
 
 ## Next Milestone: Buildroot Platform Cleanup
 
@@ -145,6 +172,7 @@ Performance is intentionally not the first priority.
 
 After Linux reaches a reliable small userspace, consider:
 
+- simulator basic-block execution or a Rust/C/C++ hot core while retaining the Python model as reference
 - instruction cache
 - data cache or a documented uncached memory model
 - burst-capable DDR bridge

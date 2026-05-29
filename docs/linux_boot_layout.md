@@ -82,6 +82,11 @@ The firmware uses `mscratch = 0x2001_0000`. The same region is visible to the PS
 | `0x000..0x0ff` | 256-byte SBI console ring data |
 | `0x100` | SBI console ring head |
 | `0x104` | SBI console total byte count |
+| `0x108` | legacy SBI console input byte |
+| `0x10c` | legacy SBI console input valid flag |
+| `0x110..0x18f` | 128-byte SBI console input ring data |
+| `0x190` | SBI console input ring read counter |
+| `0x194` | SBI console input ring write counter |
 | `0x200` | SBI ecall count |
 | `0x204` | SBI TIME count |
 | `0x208` | SBI base count |
@@ -122,6 +127,14 @@ The firmware uses `mscratch = 0x2001_0000`. The same region is visible to the PS
 | `0x33c` | payload trap PC |
 
 Some offsets above are used by older Linux contract/image-layout smokes as well as the real Linux boot path. Keep this table synchronized with `hw_bringup/ps_uart_probe.h` when adding diagnostics.
+
+The console output ring is a producer/consumer ring, not a log buffer that can be ignored forever. Firmware checks `total - head < 256` before writing the next console byte. 
+
+The board PS launcher and the simulator both must advance the head counter after draining bytes; otherwise Linux output eventually stalls in the firmware `console_wait_space` loop.
+
+The input ring mirrors the board PS UART path. The host writes bytes into `0x110..0x18f` and advances the write counter at `0x194`; SBI console getchar consumes bytes and advances `0x190`. The legacy single-byte mailbox at `0x108/0x10c` remains a fallback path, but normal Linux `hvc0` interaction uses the ring.
+
+The simulator uses this exact scratch contract for live and scripted console input. See `docs/simulator.md` for command examples.
 
 ## Timer Register Layout
 
