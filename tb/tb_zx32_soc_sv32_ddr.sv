@@ -416,8 +416,8 @@ module tb_zx32_soc_sv32_ddr;
         if (icache_hits == 32'd0 || icache_misses == 32'd0) begin
             $fatal(1, "expected DDR I-cache activity hits=%0d misses=%0d", icache_hits, icache_misses);
         end
-        if (burst_read_count == 32'd0 || max_arlen_seen !== 8'd3) begin
-            $fatal(1, "expected 4-beat DDR read bursts, count=%0d max_arlen=%0d", burst_read_count, max_arlen_seen);
+        if (burst_read_count == 32'd0 || max_arlen_seen !== 8'd7) begin
+            $fatal(1, "expected 8-beat DDR read bursts, count=%0d max_arlen=%0d", burst_read_count, max_arlen_seen);
         end
 
         $display("PASS");

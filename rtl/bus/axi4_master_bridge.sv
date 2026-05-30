@@ -13,11 +13,11 @@ module axi4_master_bridge #(
     input  logic [3:0]  wstrb,
     input  logic [31:0] addr,
     input  logic [31:0] wdata,
-    input  logic [2:0]  read_beats,
+    input  logic [3:0]  read_beats,
     output logic        ready,
     output logic [31:0] rdata,
     output logic        read_beat_valid,
-    output logic [2:0]  read_beat_index,
+    output logic [3:0]  read_beat_index,
     output logic [31:0] read_beat_data,
 
     output logic [AXI_ID_WIDTH-1:0]    M_AXI_AWID,
@@ -78,14 +78,14 @@ module axi4_master_bridge #(
     logic [3:0]  wstrb_q;
     logic [31:0] rdata_q;
     logic        aw_done_q, w_done_q;
-    logic [2:0]  read_beats_q;
-    logic [2:0]  read_beat_q;
+    logic [3:0]  read_beats_q;
+    logic [3:0]  read_beat_q;
     logic        read_final_beat;
 
     assign M_AXI_AWID    = {AXI_ID_WIDTH{1'b0}};
     assign M_AXI_ARID    = {AXI_ID_WIDTH{1'b0}};
     assign M_AXI_AWLEN   = 8'd0;
-    assign M_AXI_ARLEN   = {5'd0, read_beats_q - 3'd1};
+    assign M_AXI_ARLEN   = {4'd0, read_beats_q - 4'd1};
     assign M_AXI_AWSIZE  = 3'd2;
     assign M_AXI_ARSIZE  = 3'd2;
     assign M_AXI_AWBURST = 2'd1;
@@ -104,7 +104,7 @@ module axi4_master_bridge #(
     assign M_AXI_WDATA  = wdata_q;
     assign M_AXI_WSTRB  = wstrb_q;
     assign M_AXI_WLAST  = 1'b1;
-    assign read_final_beat = M_AXI_RLAST || (read_beat_q == (read_beats_q - 3'd1));
+    assign read_final_beat = M_AXI_RLAST || (read_beat_q == (read_beats_q - 4'd1));
     assign read_beat_valid = (state == S_WAIT_R) && M_AXI_RVALID && M_AXI_RREADY;
     assign read_beat_index = read_beat_q;
     assign read_beat_data = M_AXI_RDATA;
@@ -171,16 +171,16 @@ module axi4_master_bridge #(
             rdata_q <= 32'd0;
             aw_done_q <= 1'b0;
             w_done_q <= 1'b0;
-            read_beats_q <= 3'd1;
-            read_beat_q <= 3'd0;
+            read_beats_q <= 4'd1;
+            read_beat_q <= 4'd0;
         end else begin
             state <= next_state;
             if (state == S_IDLE && valid) begin
                 axi_addr_q <= addr - CPU_BASE_ADDR + PHYS_BASE_ADDR;
                 wdata_q <= wdata;
                 wstrb_q <= wstrb;
-                read_beats_q <= (read_beats == 3'd0) ? 3'd1 : read_beats;
-                read_beat_q <= 3'd0;
+                read_beats_q <= (read_beats == 4'd0) ? 4'd1 : read_beats;
+                read_beat_q <= 4'd0;
             end
             if (state == S_IDLE && valid && we) begin
                 aw_done_q <= 1'b0;
@@ -192,9 +192,9 @@ module axi4_master_bridge #(
             if (state == S_WAIT_R && M_AXI_RVALID && M_AXI_RREADY) begin
                 rdata_q <= M_AXI_RDATA;
                 if (read_final_beat) begin
-                    read_beat_q <= 3'd0;
+                    read_beat_q <= 4'd0;
                 end else begin
-                    read_beat_q <= read_beat_q + 3'd1;
+                    read_beat_q <= read_beat_q + 4'd1;
                 end
             end
         end
