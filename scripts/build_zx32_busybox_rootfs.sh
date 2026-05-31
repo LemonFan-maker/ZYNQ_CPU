@@ -68,6 +68,9 @@ target_dir="$1"
 # generic sysctl init script can still run during boot and pollute the console
 # with a user-space segfault, so remove the empty service from this image.
 rm -f "$target_dir/etc/init.d/S02sysctl"
+# Boot timing is measured by the PS launcher using its wall-clock timer. Remove
+# any stale initramfs-side timing hook from older generated overlays.
+rm -f "$target_dir/etc/init.d/S99zx32boot"
 EOF
     chmod +x "$post_build_script"
 

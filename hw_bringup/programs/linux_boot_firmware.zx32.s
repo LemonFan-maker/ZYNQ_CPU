@@ -55,6 +55,8 @@ m_trap:
     beq a7, t3, sbi_base
     li t3, 0x54494D45
     beq a7, t3, sbi_time
+    li t3, 0x53525354
+    beq a7, t3, sbi_system_reset
     li t3, 0x5A444247
     beq a7, t3, sbi_debug_marker
     beq a7, x0, sbi_legacy_timer
@@ -103,6 +105,8 @@ sbi_base_probe:
     li t3, 0x10
     beq a0, t3, probe_supported
     li t3, 0x54494D45
+    beq a0, t3, probe_supported
+    li t3, 0x53525354
     beq a0, t3, probe_supported
     j probe_done
 
@@ -261,6 +265,17 @@ sbi_debug_marker:
     li a0, 0
     li a1, 0
     j return_sbi
+
+sbi_system_reset:
+    li t3, 0x53525354
+    sw a0, 600(s0)
+    sw a1, 604(s0)
+    sw t3, 608(s0)
+    li t3, 0x00000222
+    sw t3, 1008(s0)
+sbi_system_reset_wait:
+    wfi
+    j sbi_system_reset_wait
 
 unsupported:
     lw t5, 536(s0)

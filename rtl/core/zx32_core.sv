@@ -3,6 +3,7 @@
 module zx32_core (
     input  logic        clk,
     input  logic        rst_n,
+    input  logic        soft_reset,
     input  logic [31:0] reset_vector,
     input  logic        irq_timer,
     input  logic        irq_external,
@@ -1215,6 +1216,93 @@ module zx32_core (
                 tlb_asid[i] <= 9'd0;
                 tlb_ppn[i] <= 22'd0;
             end
+        end else if (soft_reset) begin
+            state <= ST_RESET;
+            pc <= reset_vector;
+            instr <= 32'd0;
+            instr_q <= 32'd0;
+            op_rs1_q <= 32'd0;
+            op_rs2_q <= 32'd0;
+            load_word_q <= 32'd0;
+            muldiv_result_q <= 32'd0;
+            div_dividend_q <= 32'd0;
+            div_divisor_q <= 32'd0;
+            div_quotient_q <= 32'd0;
+            div_remainder_q <= 33'd0;
+            div_count_q <= 6'd0;
+            div_quot_neg_q <= 1'b0;
+            div_rem_neg_q <= 1'b0;
+            div_return_rem_q <= 1'b0;
+            rd_q <= 5'd0;
+            req_vaddr <= 32'd0;
+            req_paddr <= 32'd0;
+            req_wdata <= 32'd0;
+            req_wstrb <= 4'd0;
+            amo_write_data <= 32'd0;
+            req_we <= 1'b0;
+            req_is_fetch <= 1'b0;
+            req_active <= 1'b0;
+            req_pa_valid <= 1'b0;
+            tlb_lookup_hit_q <= 1'b0;
+            tlb_lookup_fault_q <= 1'b0;
+            tlb_lookup_paddr_q <= 32'd0;
+            mem_addr_q <= 32'd0;
+            dm_addr_q <= 32'd0;
+            dm_len_q <= 32'd0;
+            dm_status_q <= 32'd0;
+            dm_is_s2mm <= 1'b0;
+            ptw_return_state <= ST_RESET;
+            ptw_pte_addr <= 32'd0;
+            ptw_l1_pte <= 32'd0;
+            ptw_l0_pte <= 32'd0;
+            ptw_ad_pte <= 32'd0;
+            ptw_leaf_superpage <= 1'b0;
+            page_fault_cause <= 32'd0;
+            page_fault_tval <= 32'd0;
+            page_fault_pending <= 1'b0;
+            current_priv <= PRIV_M;
+            csr_mstatus <= 32'h0000_1800;
+            csr_medeleg <= 32'd0;
+            csr_mideleg <= 32'd0;
+            csr_mie <= 32'd0;
+            csr_mcounteren <= 32'd0;
+            csr_mtvec <= 32'd0;
+            csr_sie <= 32'd0;
+            csr_scounteren <= 32'd0;
+            csr_stvec <= 32'd0;
+            csr_sscratch <= 32'd0;
+            csr_sepc <= 32'd0;
+            csr_scause <= 32'd0;
+            csr_stval <= 32'd0;
+            csr_sip <= 32'd0;
+            csr_satp <= 32'd0;
+            csr_mscratch <= 32'd0;
+            csr_mepc <= 32'd0;
+            csr_mcause <= 32'd0;
+            csr_mtval <= 32'd0;
+            csr_mip <= 32'd0;
+            mcycle_counter <= 64'd0;
+            minstret_counter <= 64'd0;
+            wfi_cycle_counter <= 64'd0;
+            fetch_wait_counter <= 32'd0;
+            dmem_wait_counter <= 32'd0;
+            lr_reservation_valid <= 1'b0;
+            lr_reservation_addr <= 30'd0;
+            tlb_replace_ptr <= 3'd0;
+            for (int i = 0; i < TLB_ENTRIES; i++) begin
+                tlb_valid[i] <= 1'b0;
+                tlb_global[i] <= 1'b0;
+                tlb_r[i] <= 1'b0;
+                tlb_w[i] <= 1'b0;
+                tlb_x[i] <= 1'b0;
+                tlb_u[i] <= 1'b0;
+                tlb_a[i] <= 1'b0;
+                tlb_d[i] <= 1'b0;
+                tlb_superpage[i] <= 1'b0;
+                tlb_vpn[i] <= 20'd0;
+                tlb_asid[i] <= 9'd0;
+                tlb_ppn[i] <= 22'd0;
+            end
         end else begin
             mcycle_counter <= mcycle_counter + 64'd1;
             if (state == ST_WFI) begin
@@ -1229,9 +1317,96 @@ module zx32_core (
             case (state)
                 ST_RESET: begin
                     pc <= reset_vector;
+                    instr <= 32'd0;
+                    instr_q <= 32'd0;
+                    op_rs1_q <= 32'd0;
+                    op_rs2_q <= 32'd0;
+                    load_word_q <= 32'd0;
+                    muldiv_result_q <= 32'd0;
+                    div_dividend_q <= 32'd0;
+                    div_divisor_q <= 32'd0;
+                    div_quotient_q <= 32'd0;
+                    div_remainder_q <= 33'd0;
+                    div_count_q <= 6'd0;
+                    div_quot_neg_q <= 1'b0;
+                    div_rem_neg_q <= 1'b0;
+                    div_return_rem_q <= 1'b0;
+                    rd_q <= 5'd0;
+                    req_vaddr <= 32'd0;
+                    req_paddr <= 32'd0;
+                    req_wdata <= 32'd0;
+                    req_wstrb <= 4'd0;
+                    amo_write_data <= 32'd0;
+                    req_we <= 1'b0;
+                    req_is_fetch <= 1'b0;
+                    req_active <= 1'b0;
+                    req_pa_valid <= 1'b0;
+                    tlb_lookup_hit_q <= 1'b0;
+                    tlb_lookup_fault_q <= 1'b0;
+                    tlb_lookup_paddr_q <= 32'd0;
+                    mem_addr_q <= 32'd0;
+                    dm_addr_q <= 32'd0;
+                    dm_len_q <= 32'd0;
+                    dm_status_q <= 32'd0;
+                    dm_is_s2mm <= 1'b0;
+                    ptw_return_state <= ST_RESET;
+                    ptw_pte_addr <= 32'd0;
+                    ptw_l1_pte <= 32'd0;
+                    ptw_l0_pte <= 32'd0;
+                    ptw_ad_pte <= 32'd0;
+                    ptw_leaf_superpage <= 1'b0;
+                    page_fault_cause <= 32'd0;
+                    page_fault_tval <= 32'd0;
+                    page_fault_pending <= 1'b0;
+                    current_priv <= PRIV_M;
+                    csr_mstatus <= 32'h0000_1800;
+                    csr_medeleg <= 32'd0;
+                    csr_mideleg <= 32'd0;
+                    csr_mie <= 32'd0;
+                    csr_mcounteren <= 32'd0;
+                    csr_mtvec <= 32'd0;
+                    csr_sie <= 32'd0;
+                    csr_scounteren <= 32'd0;
+                    csr_stvec <= 32'd0;
+                    csr_sscratch <= 32'd0;
+                    csr_sepc <= 32'd0;
+                    csr_scause <= 32'd0;
+                    csr_stval <= 32'd0;
+                    csr_sip <= 32'd0;
+                    csr_satp <= 32'd0;
+                    csr_mscratch <= 32'd0;
+                    csr_mepc <= 32'd0;
+                    csr_mcause <= 32'd0;
+                    csr_mtval <= 32'd0;
+                    csr_mip <= 32'd0;
+                    mcycle_counter <= 64'd0;
+                    minstret_counter <= 64'd0;
+                    wfi_cycle_counter <= 64'd0;
+                    fetch_wait_counter <= 32'd0;
+                    dmem_wait_counter <= 32'd0;
+                    lr_reservation_valid <= 1'b0;
+                    lr_reservation_addr <= 30'd0;
+                    tlb_replace_ptr <= 3'd0;
+                    for (int i = 0; i < TLB_ENTRIES; i++) begin
+                        tlb_valid[i] <= 1'b0;
+                        tlb_global[i] <= 1'b0;
+                        tlb_r[i] <= 1'b0;
+                        tlb_w[i] <= 1'b0;
+                        tlb_x[i] <= 1'b0;
+                        tlb_u[i] <= 1'b0;
+                        tlb_a[i] <= 1'b0;
+                        tlb_d[i] <= 1'b0;
+                        tlb_superpage[i] <= 1'b0;
+                        tlb_vpn[i] <= 20'd0;
+                        tlb_asid[i] <= 9'd0;
+                        tlb_ppn[i] <= 22'd0;
+                    end
                     state <= ST_FETCH;
                 end
                 ST_FETCH: begin
+                    if (csr_satp == 32'd0 && pc[31:16] == 16'd0) begin
+                        current_priv <= PRIV_M;
+                    end
                     if (translate_active && !req_active) begin
                         req_vaddr <= pc;
                         req_paddr <= 32'd0;

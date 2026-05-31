@@ -3,6 +3,7 @@
 #include "xil_cache.h"
 #include "xil_io.h"
 #include "xil_printf.h"
+#include "xiltimer.h"
 #include "bspconfig.h"
 #include "xuartps_hw.h"
 #include "zx32_programs.h"
@@ -11,9 +12,74 @@
 #define ZX32_LINUX_BOOT_TRACE 0
 #endif
 
+#define ZYNQ_SLCR_UNLOCK      0xF8000008U
+#define ZYNQ_SLCR_LOCK        0xF8000004U
+#define ZYNQ_SLCR_FPGA_RST_CTRL 0xF8000240U
+#define ZYNQ_SLCR_UNLOCK_KEY  0x0000DF0DU
+#define ZYNQ_SLCR_LOCK_KEY    0x0000767BU
+#define ZYNQ_CPU_BOOT_BACKUP_PS_ADDR 0x04100000U
+#define ZYNQ_CPU_BOOT_BLOB_BYTES     0x01300000U
+
 static u32 cpu_ddr_to_ps_addr(u32 cpu_addr)
 {
     return cpu_addr - ZYNQ_CPU_DDR_CPU_BASE + ZYNQ_CPU_DDR_PHYS_BASE;
+}
+
+static void copy_words_32(u32 dst, u32 src, u32 bytes)
+{
+    for (u32 off = 0U; off < bytes; off += 4U) {
+        Xil_Out32(dst + off, Xil_In32(src + off));
+    }
+}
+
+static u64 boot_elapsed_ms(XTime start, XTime now)
+{
+    u64 delta = (u64)(now - start);
+
+    return (delta * 1000ULL) / (u64)COUNTS_PER_SECOND;
+}
+
+static void print_boot_elapsed(const char *label, XTime start, XTime now)
+{
+    u64 ms = boot_elapsed_ms(start, now);
+
+    xil_printf("[zx32-boot] %s elapsed=%u.%03us\r\n",
+               label,
+               (unsigned int)(ms / 1000ULL),
+               (unsigned int)(ms % 1000ULL));
+}
+
+static void pulse_pl_reset(void)
+{
+    Xil_Out32(ZYNQ_SLCR_UNLOCK, ZYNQ_SLCR_UNLOCK_KEY);
+    Xil_Out32(ZYNQ_SLCR_FPGA_RST_CTRL, 0x0000000FU);
+    for (volatile u32 delay = 0U; delay < 10000U; delay++) {
+    }
+    Xil_Out32(ZYNQ_SLCR_FPGA_RST_CTRL, 0x00000000U);
+    for (volatile u32 delay = 0U; delay < 10000U; delay++) {
+    }
+    Xil_Out32(ZYNQ_SLCR_LOCK, ZYNQ_SLCR_LOCK_KEY);
+}
+
+static const char *linux_loglevel_color(u32 level)
+{
+    switch (level) {
+    case 0U:
+    case 1U:
+    case 2U:
+    case 3U:
+        return "\x1b[31m";
+    case 4U:
+        return "\x1b[33m";
+    case 5U:
+        return "\x1b[35m";
+    case 6U:
+        return "\x1b[36m";
+    case 7U:
+        return "\x1b[90m";
+    default:
+        return "";
+    }
 }
 
 static void print_sv32_pte(const char *name, const char *slot, u32 idx, u32 pte_addr, u32 pte)
@@ -202,12 +268,19 @@ static void print_linux_memset_probe(u32 *last_probe_dmem, u32 *last_probe_imem)
     }
 }
 
-static int print_linux_console_mirror(u32 *last_total, int *started)
+static u32 print_linux_console_mirror(u32 *last_total, int *started)
 {
     static const char idle_marker[] = "[zx32-init] idle";
+    static const char welcome_marker[] = "Welcome to Buildroot";
+    static const char login_marker[] = "buildroot login:";
     static u32 idle_match = 0U;
+    static u32 welcome_match = 0U;
+    static u32 login_match = 0U;
+    static int at_line_start = 1;
+    static int colored_line = 0;
+    static u32 loglevel_match = 0U;
     u32 total = Xil_In32(CPU_LINUX_CONSOLE_RING_TOTAL);
-    int idle_seen = 0;
+    u32 events = 0U;
 
     if (total == *last_total) {
         return 0;
@@ -230,26 +303,73 @@ static int print_linux_console_mirror(u32 *last_total, int *started)
         u32 ch = (word >> ((idx & 3U) * 8U)) & 0xffU;
 
         if (ch == '\n') {
+            if (colored_line != 0) {
+                xil_printf("\x1b[0m");
+                colored_line = 0;
+            }
             xil_printf("\r\n");
+            at_line_start = 1;
+            loglevel_match = 0U;
         } else if (ch != '\r') {
+            if (loglevel_match == 1U) {
+                if (ch >= '0' && ch <= '7') {
+                    xil_printf("%s", linux_loglevel_color(ch - '0'));
+                    colored_line = 1;
+                    loglevel_match = 2U;
+                } else {
+                    at_line_start = 0;
+                    loglevel_match = 0U;
+                }
+            } else if (loglevel_match == 2U) {
+                if (ch == '>') {
+                    at_line_start = 0;
+                }
+                loglevel_match = 0U;
+            } else if (at_line_start != 0) {
+                if (ch == '<') {
+                    loglevel_match = 1U;
+                } else {
+                    at_line_start = 0;
+                }
+            }
             xil_printf("%c", (char)ch);
         }
 
         if (ch == (u32)idle_marker[idle_match]) {
             idle_match++;
             if (idle_match == (sizeof(idle_marker) - 1U)) {
-                idle_seen = 1;
+                events |= 1U;
                 idle_match = 0U;
             }
         } else {
             idle_match = (ch == (u32)idle_marker[0]) ? 1U : 0U;
         }
 
+        if (ch == (u32)welcome_marker[welcome_match]) {
+            welcome_match++;
+            if (welcome_match == (sizeof(welcome_marker) - 1U)) {
+                events |= 2U;
+                welcome_match = 0U;
+            }
+        } else {
+            welcome_match = (ch == (u32)welcome_marker[0]) ? 1U : 0U;
+        }
+
+        if (ch == (u32)login_marker[login_match]) {
+            login_match++;
+            if (login_match == (sizeof(login_marker) - 1U)) {
+                events |= 4U;
+                login_match = 0U;
+            }
+        } else {
+            login_match = (ch == (u32)login_marker[0]) ? 1U : 0U;
+        }
+
         (*last_total)++;
         Xil_Out32(CPU_LINUX_CONSOLE_RING_HEAD, *last_total);
     }
 
-    return idle_seen;
+    return events;
 }
 
 static void pump_linux_console_input(void)
@@ -323,6 +443,7 @@ int main(void)
     u32 firmware_words = 0U;
     u32 firmware_entry = 0U;
     u32 verify_errors = 0U;
+    u32 boot_count = 0U;
     u32 ps_code0;
     u32 ps_text_lo;
     u32 ps_text_hi;
@@ -356,13 +477,61 @@ int main(void)
     u32 idle_report_count = 0U;
     int linux_console_started = 0;
     int userspace_idle_seen = 0;
+    int welcome_seen = 0;
+    int login_seen = 0;
+    int boot_artifacts_backed_up = 0;
+    XTime boot_start_time;
     int rc;
 
     Xil_DCacheDisable();
 
+restart_linux_boot:
+    boot_count++;
+    firmware_words = 0U;
+    firmware_entry = 0U;
+    verify_errors = 0U;
+    last_mcause = 0xffffffffU;
+    last_mepc = 0xffffffffU;
+    last_eid = 0xffffffffU;
+    last_fid = 0xffffffffU;
+    last_arg0 = 0xffffffffU;
+    last_head_marker = 0xffffffffU;
+    last_pc = 0xffffffffU;
+    last_satp = 0xffffffffU;
+    last_ecall_count = 0xffffffffU;
+    last_time_count = 0xffffffffU;
+    last_base_count = 0xffffffffU;
+    last_console_put_count = 0xffffffffU;
+    last_console_get_count = 0xffffffffU;
+    last_debug_count = 0xffffffffU;
+    last_unsupported_count = 0xffffffffU;
+    last_trap_count = 0xffffffffU;
+    last_console_total = 0U;
+    last_probe_dmem = 0U;
+    last_probe_imem = 0U;
+    report_count = 0U;
+    idle_report_count = 0U;
+    linux_console_started = 0;
+    userspace_idle_seen = 0;
+    welcome_seen = 0;
+    login_seen = 0;
+
+    Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
+    XTime_GetTime(&boot_start_time);
+
     xil_printf("\r\n");
     xil_printf("> ZYNQ_CPU Linux boot launcher\r\n");
     xil_printf("Diag rev: linux_bring_up\r\n");
+    xil_printf("Boot count: %u\r\n", (unsigned int)boot_count);
+
+    if (boot_artifacts_backed_up != 0) {
+        copy_words_32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR,
+                      ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                      ZYNQ_CPU_BOOT_BLOB_BYTES);
+        xil_printf("Boot artifacts restored from PS 0x%08x bytes=0x%08x\r\n",
+                   (unsigned int)ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                   (unsigned int)ZYNQ_CPU_BOOT_BLOB_BYTES);
+    }
 
     scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
     scratch_bytes = scratch_words * 4U;
@@ -403,6 +572,16 @@ int main(void)
         }
     }
 
+    if (boot_artifacts_backed_up == 0) {
+        copy_words_32(ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                      ZYNQ_CPU_LINUX_KERNEL_PS_ADDR,
+                      ZYNQ_CPU_BOOT_BLOB_BYTES);
+        boot_artifacts_backed_up = 1;
+        xil_printf("Boot artifacts backed up to PS 0x%08x bytes=0x%08x\r\n",
+                   (unsigned int)ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                   (unsigned int)ZYNQ_CPU_BOOT_BLOB_BYTES);
+    }
+
     if (ring_offset > scratch_bytes ||
         CPU_LINUX_CONSOLE_RING_BYTES > (scratch_bytes - ring_offset)) {
         xil_printf("Linux console ring outside TX scratch aperture\r\n");
@@ -428,6 +607,9 @@ int main(void)
     Xil_Out32(CPU_LINUX_HEAD_AMO_OLD, 0xffffffffU);
     Xil_Out32(CPU_LINUX_HEAD_BSS_LO, 0U);
     Xil_Out32(CPU_LINUX_HEAD_BSS_HI, 0U);
+    Xil_Out32(CPU_LINUX_RESET_TYPE, 0U);
+    Xil_Out32(CPU_LINUX_RESET_REASON, 0U);
+    Xil_Out32(CPU_LINUX_RESET_MAGIC, 0U);
     clear_linux_sbi_counters();
     Xil_Out32(CPU_MAIL_STATUS, 0U);
 
@@ -481,11 +663,43 @@ int main(void)
 
         pump_linux_console_input();
 
-        if (print_linux_console_mirror(&last_console_total, &linux_console_started) != 0 &&
-            userspace_idle_seen == 0) {
-            userspace_idle_seen = 1;
-            xil_printf("Boot monitor: userspace idle reached\r\n");
-            print_linux_sbi_counters();
+        {
+            u32 console_events = print_linux_console_mirror(&last_console_total, &linux_console_started);
+
+            if ((console_events & 2U) != 0U && welcome_seen == 0) {
+                XTime now;
+
+                welcome_seen = 1;
+                XTime_GetTime(&now);
+                xil_printf("\r\n");
+                print_boot_elapsed("Welcome to Buildroot", boot_start_time, now);
+            }
+            if ((console_events & 4U) != 0U && login_seen == 0) {
+                XTime now;
+
+                login_seen = 1;
+                XTime_GetTime(&now);
+                xil_printf("\r\n");
+                print_boot_elapsed("buildroot login", boot_start_time, now);
+            }
+            if ((console_events & 1U) != 0U && userspace_idle_seen == 0) {
+                userspace_idle_seen = 1;
+                xil_printf("Boot monitor: userspace idle reached\r\n");
+                print_linux_sbi_counters();
+            }
+        }
+
+        if (Xil_In32(CPU_LINUX_RESET_MAGIC) == CPU_LINUX_RESET_MAGIC_VALUE) {
+            XTime now;
+
+            XTime_GetTime(&now);
+            print_boot_elapsed("Linux reboot requested", boot_start_time, now);
+            xil_printf("Boot monitor: SBI system reset type=0x%08x reason=0x%08x\r\n",
+                       (unsigned int)Xil_In32(CPU_LINUX_RESET_TYPE),
+                       (unsigned int)Xil_In32(CPU_LINUX_RESET_REASON));
+            Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
+            pulse_pl_reset();
+            goto restart_linux_boot;
         }
 
         {

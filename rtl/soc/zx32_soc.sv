@@ -210,7 +210,6 @@ module zx32_soc #(
     logic        scratch_s2mm_error;
     logic        cpu_reset_req;
     logic [31:0] cpu_reset_vector;
-    logic        core_rst_n;
     logic [31:0] dbg_core_state;
     logic [31:0] dbg_pc;
     logic [31:0] dbg_satp;
@@ -329,7 +328,6 @@ module zx32_soc #(
     assign host_ready = host_valid && bus_ready;
     assign host_rdata = bus_rdata;
     assign ctrl_ready = ctrl_valid;
-    assign core_rst_n = rst_n && !cpu_reset_req;
     assign dbg_bus_state = {20'd0,
                             ddr_req_valid,
                             ddr_req_we,
@@ -408,6 +406,22 @@ module zx32_soc #(
         if (!rst_n) begin
             cpu_reset_req <= 1'b0;
             cpu_reset_vector <= 32'd0;
+        end else if (ctrl_valid && bus_we) begin
+            if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
+                cpu_reset_req <= bus_wdata[0];
+            end
+            if (bus_addr[5:2] == 4'h4) begin
+                for (int i = 0; i < 4; i++) begin
+                    if (bus_wstrb[i]) begin
+                        cpu_reset_vector[i * 8 +: 8] <= bus_wdata[i * 8 +: 8];
+                    end
+                end
+            end
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n || cpu_reset_req) begin
             dbg_last_ddr_addr <= 32'd0;
             dbg_last_ddr_state <= 32'd0;
             dbg_last_imem_addr <= 32'd0;
@@ -449,17 +463,6 @@ module zx32_soc #(
             dcache_refill_rdata_q <= 32'd0;
             dcache_resp_valid <= 1'b0;
             dcache_resp_rdata <= 32'd0;
-        end else if (ctrl_valid && bus_we) begin
-            if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
-                cpu_reset_req <= bus_wdata[0];
-            end
-            if (bus_addr[5:2] == 4'h4) begin
-                for (int i = 0; i < 4; i++) begin
-                    if (bus_wstrb[i]) begin
-                        cpu_reset_vector[i * 8 +: 8] <= bus_wdata[i * 8 +: 8];
-                    end
-                end
-            end
         end else begin
             if (imem_ddr_raw_selected && icache_hit) begin
                 perf_icache_hits <= perf_icache_hits + 32'd1;
@@ -602,7 +605,8 @@ module zx32_soc #(
 
     zx32_core u_core (
         .clk(clk),
-        .rst_n(core_rst_n),
+        .rst_n(rst_n),
+        .soft_reset(cpu_reset_req),
         .reset_vector(cpu_reset_vector),
         .irq_timer(timer_irq),
         .irq_external(irq_external),
