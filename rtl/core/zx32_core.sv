@@ -654,7 +654,7 @@ module zx32_core (
     assign wfi_external_wake = irq_external &&
                                (((current_priv != PRIV_M) && csr_mideleg[IRQ_S_EXT] && csr_sie[IRQ_S_EXT]) ||
                                 (csr_mie[IRQ_M_EXT] && (current_priv == PRIV_M || !csr_mideleg[IRQ_S_EXT])));
-    assign wfi_wake = irq_timer || irq_external || wfi_timer_wake || wfi_external_wake;
+    assign wfi_wake = wfi_timer_wake || wfi_external_wake;
     assign writeback_enter_wfi = (state == ST_WRITEBACK) &&
                                  system_wfi &&
                                  !illegal_instr &&

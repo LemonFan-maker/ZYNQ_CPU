@@ -42,6 +42,7 @@ from zx32sim.elf import load_elf
 from zx32sim.main import ConsoleSend, drain_console_ring, load_console_script, main as sim_main, read_console_ring, run_with_cli_stops, write_console_input
 from zx32sim.memory import Memory
 from zx32sim.virtio import VIRTIO_MMIO_BASE, VirtioMmioBlockDevice
+from zx32sim.xsbl import CPU_LINUX_DTB, CPU_LINUX_ENTRY, load_xsbl_plan, ps_to_cpu_addr
 
 
 class ZX32SimTests(unittest.TestCase):
@@ -160,6 +161,51 @@ class ZX32SimTests(unittest.TestCase):
         self.assertEqual(reason, StopReason.RUNNING)
         self.assertEqual(cpu.steps, 1000)
         self.assertEqual(cpu.pc, 0x44)
+
+    def test_xsbl_plan_maps_linux_downloads_to_simulator_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            (repo / "build/linux-mainline-rv32/arch/riscv/boot").mkdir(parents=True)
+            (repo / "build/linux").mkdir(parents=True)
+            (repo / "hw_bringup/build/elf").mkdir(parents=True)
+            (repo / "hw_bringup/build").mkdir(parents=True, exist_ok=True)
+            (repo / "build/vivado_hw/zynq_cpu_hw.runs/impl_1").mkdir(parents=True)
+            image = repo / "build/linux-mainline-rv32/arch/riscv/boot/Image"
+            dtb = repo / "build/linux/zynq_cpu.dtb"
+            firmware = repo / "hw_bringup/build/elf/linux_boot_firmware.elf"
+            launcher = repo / "hw_bringup/build/ps_linux_boot.elf"
+            bit = repo / "build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit"
+            for path in (image, dtb, firmware, launcher, bit):
+                path.write_bytes(b"x")
+            xsbl = repo / "hw_bringup/download_zynq_cpu_linux_boot.xsbl"
+            xsbl.parent.mkdir(parents=True, exist_ok=True)
+            xsbl.write_text(
+                "\n".join(
+                    [
+                        "connect",
+                        "targets -set -filter {name =~ \"ARM*#0\"}",
+                        "rst -system",
+                        "fpga -f ./build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit",
+                        "source ./build/vivado_hw/zynq_cpu_hw.gen/sources_1/bd/zynq_cpu_system/ip/zynq_cpu_system_processing_system7_0_0/ps7_init.tcl",
+                        "ps7_init",
+                        "ps7_post_config",
+                        "dow -data ./build/linux-mainline-rv32/arch/riscv/boot/Image 0x00500000",
+                        "dow -data ./build/linux/zynq_cpu.dtb 0x01700000",
+                        "dow ./hw_bringup/build/ps_linux_boot.elf",
+                        "con",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            plan = load_xsbl_plan(xsbl, repo, firmware)
+
+        self.assertEqual(ps_to_cpu_addr(0x00500000), 0x80400000)
+        self.assertEqual(ps_to_cpu_addr(0x01700000), 0x81600000)
+        self.assertEqual([download.cpu_addr for download in plan.data_downloads], [0x80400000, 0x81600000])
+        self.assertIn("--load-raw", plan.sim_argv())
+        self.assertIn(f"0x{CPU_LINUX_ENTRY:08x}=0x80400000", plan.sim_argv())
+        self.assertIn(f"0x{CPU_LINUX_DTB:08x}=0x81600000", plan.sim_argv())
 
     def test_supervisor_ecall_delegation(self) -> None:
         _cpu, mem, reason = self.run_source(
