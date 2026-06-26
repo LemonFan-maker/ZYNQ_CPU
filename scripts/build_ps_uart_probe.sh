@@ -31,6 +31,9 @@ build_elf() {
 
     cmd="source /home/orionisli/.zshrc >/dev/null 2>&1 && vi25 && $(printf '%q' "$tool_base/arm-none-eabi-gcc")"
     cmd+=" -DSDT -O2 -mcpu=cortex-a9 -mfpu=vfpv3 -mfloat-abi=hard"
+    if [[ -n "${PS_UART_PROBE_CFLAGS:-}" ]]; then
+        cmd+=" $PS_UART_PROBE_CFLAGS"
+    fi
     cmd+=" -specs=$(printf '%q' "$bsp/Xilinx.spec")"
     cmd+=" -I$(printf '%q' "$gen_dir")"
     cmd+=" -I$(printf '%q' "$repo_dir/hw_bringup")"

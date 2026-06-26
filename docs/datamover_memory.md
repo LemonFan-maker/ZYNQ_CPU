@@ -20,16 +20,17 @@ PL CPU 0x8000_0000 -> PS physical 0x0010_0000
 
 Current behavior:
 
-- single-beat 32-bit AXI4 reads and writes
+- serialized AXI4 requests through the current bridge/front end
 - used for PL CPU DDR random access smoke tests
 - used for PL CPU instruction fetch from DDR
-- no cache
-- no burst fetch
+- small direct-mapped instruction and data caches for DDR reads
+- D-cache next-line prefetch for detected sequential read streams
+- raw DDR writes invalidate matching I-cache and D-cache entries
 - no outstanding request queue
 
 This is enough for the current Buildroot Linux boot, including kernel instruction fetches, kernel data accesses, page-table walks, and BusyBox userspace.
 
-It is still an uncached, single-beat bring-up path rather than a performance-oriented Linux memory subsystem.
+It is still a simple bring-up memory system rather than a performance-oriented Linux memory subsystem. The prefetch path is intentionally conservative: it only arms after a sequential DDR read miss and blocks demand completion while the prefetch line is in flight, so future changes should keep random-read behavior and Linux boot stability in the regression set.
 
 ## DataMover Path
 

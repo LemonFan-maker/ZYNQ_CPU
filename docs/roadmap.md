@@ -38,6 +38,7 @@ These are already represented in code, tests, or board logs:
 - simulator virtio-mmio block model and simulator-only DTB exist for disk experiments
 - simulator WFI/timer fast-forward keeps Linux idle runs practical
 - Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
+- DDR read-side I-cache/D-cache behavior is active in the SoC, including stream-gated D-cache next-line prefetch for sequential read misses
 
 ## Current Development Stage
 
@@ -173,8 +174,7 @@ Performance is intentionally not the first priority.
 After Linux reaches a reliable small userspace, consider:
 
 - simulator basic-block execution or a Rust/C/C++ hot core while retaining the Python model as reference
-- instruction cache
-- data cache or a documented uncached memory model
+- broader cache policy work beyond the current small direct-mapped I-cache/D-cache
 - burst-capable DDR bridge
 - prefetch for instruction fetch from DDR
 - larger local memories

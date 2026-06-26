@@ -96,6 +96,14 @@ Build the PS UART probe:
 ./scripts/build_ps_uart_probe.sh
 ```
 
+Optional extra compiler flags can be passed through `PS_UART_PROBE_CFLAGS`:
+
+```sh
+PS_UART_PROBE_CFLAGS='-DDEBUG_TRACE=1' ./scripts/build_ps_uart_probe.sh
+```
+
+Keep the default build quiet for normal Linux boot runs. Use extra flags only for temporary diagnostics.
+
 Prepare and build the current Linux boot artifacts:
 
 ```sh

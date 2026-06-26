@@ -35,7 +35,7 @@ The simulator is not cycle accurate. It is a reference model for software-visibl
 The core is a multi-cycle in-order RV32 design. It is intentionally simple:
 
 - one instruction is processed through explicit fetch/decode/execute/memory/writeback-style states
-- no instruction or data cache
+- no core pipeline; the SoC wraps DDR instruction/data accesses with small direct-mapped caches
 - no pipeline hazards to manage yet
 - memory requests are held until the selected local, MMIO, or DDR target is ready
 
@@ -82,7 +82,9 @@ The DDR window is translated by `rtl/bus/axi4_master_bridge.sv`:
 PL CPU 0x8000_0000 -> PS physical 0x0010_0000
 ```
 
-The bridge currently issues single-beat 32-bit AXI4 reads and writes. It is good enough for smoke tests and early firmware, but not a cache or high-performance memory system.
+The bridge currently issues serialized AXI4 requests behind the SoC memory front end. DDR instruction and data reads are cached in small direct-mapped line caches, while raw writes still go to DDR and invalidate the matching cache line. The D-cache also has a conservative next-line prefetch path for sequential DDR read misses. Prefetch is stream-gated so random reads do not continuously pull useless cache lines from DDR.
+
+This is enough for the current Linux and Buildroot path, but it is still a simple bring-up memory system rather than a high-performance coherent cache hierarchy.
 
 ## PS-Side AXI Register Windows
 

@@ -47,17 +47,28 @@ Last recorded result:
 - Critical warnings: 0
 - Bitstream: `build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit`
 - XSA: `build/vivado_hw/zynq_cpu_system_wrapper.xsa`
+- Recorded after the D-cache stream prefetch and core reset timing update.
 
 Timing snapshot:
 
 | Metric | Value |
 | --- | ---: |
-| Setup WNS | 0.358 ns |
+| Setup WNS | 0.017 ns |
 | Setup TNS | 0.000 ns |
 | Setup failing endpoints | 0 |
-| Hold WHS | 0.051 ns |
+| Hold WHS | 0.043 ns |
 | Hold THS | 0.000 ns |
 | Hold failing endpoints | 0 |
+
+Worst setup path in this build:
+
+- source: `req_is_fetch_reg`
+- destination: `ptw_l1_pte_reg[30]`
+- data path delay: 12.994 ns
+- logic levels: 17
+- routing share: about 74%
+
+The margin is small. Treat the build as timing-clean but close to the 75 MHz limit.
 
 Resource snapshot:
 
@@ -74,7 +85,9 @@ The current timing closure depends on keeping memory request address/data paths 
 
 - AMO load data is registered before AMO result calculation.
 - data-memory addresses are registered before memory states drive the SoC bus.
-- the direct DDR bridge is single-beat and serialized, which keeps the early timing surface small.
+- the direct DDR bridge/front end is serialized, which keeps the early timing surface small.
+- the core asynchronous reset path does not load the variable `reset_vector` directly into `pc`; reset enters `ST_RESET`, and the reset vector is loaded synchronously from that state. This avoids a variable asynchronous reset load on the PC flops.
+- D-cache prefetch must not steal demand-response completion. Demand `imem_ready`/`bus_ready` are gated while a prefetch line is in flight, and refill data is only written to the prefetch target when no demand I-cache/D-cache refill is active.
 
 ## Memory Implementation Notes
 

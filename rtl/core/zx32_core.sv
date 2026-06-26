@@ -1135,7 +1135,7 @@ module zx32_core (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= ST_RESET;
-            pc <= reset_vector;
+            pc <= 32'd0;
             instr <= 32'd0;
             instr_q <= 32'd0;
             op_rs1_q <= 32'd0;
