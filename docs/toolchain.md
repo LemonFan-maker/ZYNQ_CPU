@@ -23,8 +23,10 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `scripts/run_zx32_toolchain_tests.sh` | run assembler and ELF unit tests |
 | `scripts/run_zx32sim_smokes.sh` | run ZX32 functional simulator smoke tests |
 | `scripts/run_zx32sim_linux_early.sh` | boot the Linux Image/DTB/SBI firmware in the functional simulator |
+| `scripts/run_zx32sim_xsbl.sh` | run a board-style XSBL download flow through the functional simulator |
 | `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
+| `scripts/build_zx32_membench.sh` | build the Linux userspace DDR/cache benchmark into the Buildroot overlay |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
 | `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as Linux initramfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
@@ -104,6 +106,21 @@ PS_UART_PROBE_CFLAGS='-DDEBUG_TRACE=1' ./scripts/build_ps_uart_probe.sh
 
 Keep the default build quiet for normal Linux boot runs. Use extra flags only for temporary diagnostics.
 
+Build the Linux userspace memory benchmark into the Buildroot overlay:
+
+```sh
+./scripts/build_zx32_membench.sh
+```
+
+The benchmark binary is written to the Buildroot overlay as `usr/bin/zx32_membench`. Rebuild the rootfs and kernel Image after running this script:
+
+```sh
+./scripts/build_zx32_busybox_rootfs.sh
+./scripts/build_mainline_rv32_linux.sh
+./scripts/prepare_linux_boot_artifacts.sh
+./scripts/build_ps_uart_probe.sh
+```
+
 Prepare and build the current Linux boot artifacts:
 
 ```sh
@@ -124,6 +141,12 @@ Boot the current Linux artifacts in the functional simulator and stop when the B
 
 ```sh
 ./scripts/run_zx32sim_linux_early.sh
+```
+
+Run the same Linux boot path through the board-style XSBL download script parser:
+
+```sh
+./scripts/run_zx32sim_xsbl.sh
 ```
 
 Run the same path with live terminal input/output:

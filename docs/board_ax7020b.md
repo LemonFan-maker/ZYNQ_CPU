@@ -49,7 +49,7 @@ Current DDR assumptions:
 Current hardware has two DDR access paths from PL:
 
 - AXI DataMover through PS HP for bulk block transfers
-- direct single-beat AXI4 master bridge for PL CPU load/store/fetch
+- direct serialized AXI4 master bridge for PL CPU load/store/fetch, with multi-beat read refills used by the SoC I-cache/D-cache front end
 
 Both paths have passed board smoke tests.
 

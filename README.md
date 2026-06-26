@@ -14,7 +14,7 @@ Implemented and tested in the current tree:
 - Machine and supervisor CSR substrate, exception return, delegated traps, timer interrupt path, external interrupt path, counters, `satp`, Sv32 page walking, small TLB, and `sfence.vma`.
 - Local boot/scratch memories and simple MMIO peripherals.
 - AXI DataMover control path for bulk DDR transfers through Zynq PS HP.
-- Direct single-word AXI4 master bridge for PL CPU load/store and instruction fetches from PS DDR.
+- Direct serialized AXI4 master bridge for PL CPU load/store and instruction fetches from PS DDR, with multi-beat read refills behind the SoC I-cache/D-cache front end.
 - PS-side bring-up probe that loads ZX32 assembly/ELF tests, starts the PL CPU, and reports PASS/FAIL over PS UART.
 
 Latest board-level bring-up has passed:
@@ -79,7 +79,7 @@ The next Linux work is to make this Buildroot environment repeatable on both boa
 | `tb/` | Icarus Verilog/SystemVerilog testbenches |
 | `tools/` | ZX32 assembler, ELF packer, and unit tests |
 | `tools/zx32sim/` | Python functional simulator for ISA, SBI, Linux, and device-model bring-up |
-| `hw_bringup/` | PS UART probe and PL CPU assembly smoke programs |
+| `hw_bringup/` | PS UART probe, PL CPU assembly smoke programs, and small userspace test tools |
 | `linux/` | Linux DTS and config fragment |
 | `docs/linux_*.md` | Linux boot layout and bring-up contract notes |
 | `vivado/` | Vivado batch scripts for synthesis and hardware bring-up |
@@ -122,6 +122,14 @@ Build the PS UART probe ELF. This also regenerates the ZX32 program header from 
 ```sh
 ./scripts/build_ps_uart_probe.sh
 ```
+
+Build the Linux userspace memory benchmark into the Buildroot overlay:
+
+```sh
+./scripts/build_zx32_membench.sh
+```
+
+After rebuilding the benchmark, rebuild the rootfs, kernel Image, and Linux boot artifacts before booting the board.
 
 Run the RTL-only Vivado synthesis check:
 

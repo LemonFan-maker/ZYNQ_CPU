@@ -135,6 +135,14 @@ Do not preload login text too early with `ZX32SIM_CONSOLE_INPUT` when testing a 
 | `ZX32SIM_VIRTIO_BLOCK_IMAGE` | empty | Attach a virtio-mmio block image and switch to the simulator DTB. |
 | `ZX32SIM_EXTRA_ARGS` | empty | Append raw `tools.zx32sim.main` CLI arguments. |
 
+For flows that should mirror the board download script more closely, use:
+
+```sh
+./scripts/run_zx32sim_xsbl.sh
+```
+
+That runner parses an XSBL-style download script, maps the PS DDR downloads into the simulator CPU DDR window, and then applies the same console and stop-condition environment variables used by the normal Linux simulator runner.
+
 ## Console Model
 
 The board and simulator use the same scratch-backed SBI console contract. 
@@ -248,7 +256,7 @@ Run the full boardless regression set:
 ## Limitations
 
 - It is not cycle accurate and does not model RTL state-machine timing.
-- It does not model caches because the RTL currently has no cache hierarchy.
+- It does not model cache timing, refill latency, or prefetch behavior. The simulator remains a functional model of software-visible behavior.
 - The virtio block/Plic path is simulator-only and not part of the current board platform ABI.
 - Real-time terminal behavior depends on host terminal buffering. Scripted console sessions are better for repeatable tests.
-- The default Linux DTB still exposes only about 24 MiB starting at `0x80000000`; after kernel and initramfs reservations, BusyBox sees only a few MiB of free memory. That matches the current bring-up layout rather than a full DDR-sized machine model.
+- The default Linux DTB currently exposes 64 MiB starting at `0x80000000`. That is still a bring-up-sized machine description rather than a full DDR-sized platform model.

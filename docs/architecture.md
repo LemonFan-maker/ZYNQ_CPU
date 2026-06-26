@@ -144,7 +144,7 @@ Current Linux-visible behavior:
 - `hvc0` input is forwarded from PS UART through a scratch-backed SBI getchar ring
 - timer events use SBI TIME and the local MMIO timer
 - Sv32 page walking and the TLB are sufficient for kernel init and Buildroot userspace
-- the direct DDR bridge provides uncached single-beat instruction/data access
+- the direct DDR path provides cached read refills through the SoC I-cache/D-cache front end; raw writes remain serialized and invalidate matching cache lines
 - no Linux drivers exist yet for the custom PL UART, timer, IRQ controller, or DataMover blocks
 
 The simulator mirrors this path closely enough to reach an interactive Buildroot shell without a board. 

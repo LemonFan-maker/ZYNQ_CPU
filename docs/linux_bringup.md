@@ -177,7 +177,7 @@ Use the ordinary board probe for broader CPU/SoC smoke tests:
 - The SBI shim is local bring-up firmware, not a full OpenSBI port.
 - Timer bridging currently depends on a measured `rdtime` to MMIO `mtime` offset.
 - Linux-visible custom UART, timer, interrupt controller, and DataMover drivers are not implemented.
-- The direct DDR bridge is uncached, single-beat, and slow; correctness is the current priority.
+- The direct DDR path is still a simple bring-up memory system: read-side I-cache/D-cache refills are present, raw writes are serialized and invalidate matching cache lines, and correctness is still the priority.
 - The DTB is still a bring-up description and should be updated whenever the platform ABI changes.
 - Console input is functional but still routed through the PS launcher polling loop and scratch ring, so it is not a high-performance terminal path.
 

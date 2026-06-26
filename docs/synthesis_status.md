@@ -22,10 +22,10 @@ Resource snapshot:
 
 | Resource | Used | Device | Percent |
 | --- | ---: | ---: | ---: |
-| Slice LUTs | 5999 | 53200 | 11.28% |
-| Slice Registers | 2498 | 106400 | 2.35% |
+| Slice LUTs | 30133 | 53200 | 56.64% |
+| Slice Registers | 18211 | 106400 | 17.12% |
 | Block RAM Tile | 4 | 140 | 2.86% |
-| DSPs | 12 | 220 | 5.45% |
+| DSPs | 10 | 220 | 4.55% |
 
 The standalone RTL synthesis script does not provide full board timing context, so use it as a synthesizability/resource check rather than final timing signoff.
 
@@ -74,10 +74,10 @@ Resource snapshot:
 
 | Resource | Used | Device | Percent |
 | --- | ---: | ---: | ---: |
-| Slice LUTs | 8013 | 53200 | 15.06% |
-| Slice Registers | 5282 | 106400 | 4.96% |
+| Slice LUTs | 29085 | 53200 | 54.67% |
+| Slice Registers | 21259 | 106400 | 19.98% |
 | Block RAM Tile | 5.5 | 140 | 3.93% |
-| DSPs | 12 | 220 | 5.45% |
+| DSPs | 10 | 220 | 4.55% |
 
 ## Timing Notes
 
