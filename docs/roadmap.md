@@ -39,6 +39,8 @@ These are already represented in code, tests, or board logs:
 - simulator WFI/timer fast-forward keeps Linux idle runs practical
 - Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
 - DDR read-side I-cache/D-cache behavior is active in the SoC, including stream-gated D-cache next-line prefetch for sequential read misses
+- GPU fill renderer v0 exists as an MMIO device for framebuffer clear and fill-rectangle DDR writeback tests
+- Linux userspace GPU smoke test exists as `zx32_gpu_smoke`, using `/dev/mem` and the reserved `0x83f0_0000` framebuffer region
 
 ## Current Development Stage
 
@@ -166,6 +168,18 @@ Required work:
 - expand AMO/LR/SC and memory-ordering tests
 - test direct DDR load/store with wider address and alignment cases
 - decide whether scratchpad memories should become explicit block RAMs
+
+## Next Milestone: GPU Renderer Bring-Up
+
+Goal: turn the current RTL-level fill renderer into a useful Linux-visible rendering experiment.
+
+Required work:
+
+- run `zx32_gpu_smoke` on board Linux and capture the PASS/fail signature
+- keep the reserved `0x83f0_0000` framebuffer smoke region until a real allocator contract is needed
+- keep the GPU path polling-based until the interrupt contract is needed
+- rerun Vivado implementation before treating the renderer as board-ready
+- defer triangle rasterization until clear/fill has a board-level test
 
 ## Later Performance Work
 

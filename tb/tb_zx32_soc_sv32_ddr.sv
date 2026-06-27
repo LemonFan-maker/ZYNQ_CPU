@@ -73,6 +73,7 @@ module tb_zx32_soc_sv32_ddr;
     logic        M_AXI_DDR_RREADY;
 
     localparam logic [31:0] CTRL_BASE = 32'h1003_0000;
+    localparam logic [31:0] GPU_BASE = 32'h1007_0000;
     localparam logic [31:0] IMEM_BASE = 32'h0000_0000;
     localparam logic [31:0] KERNEL_CPU_BASE = 32'h8040_0000;
     localparam logic [31:0] ROOT_CPU_BASE = 32'h8080_0000;
@@ -326,6 +327,8 @@ module tb_zx32_soc_sv32_ddr;
         logic [31:0] stval;
         logic [31:0] icache_hits;
         logic [31:0] icache_misses;
+        logic [31:0] gpu_status;
+        logic [31:0] gpu_first_word;
 
         host_valid = 1'b0;
         host_we = 1'b0;
@@ -353,6 +356,120 @@ module tb_zx32_soc_sv32_ddr;
         repeat (4) @(posedge clk);
         rst_n = 1'b1;
         repeat (4) @(posedge clk);
+
+        host_write(GPU_BASE + 32'h08, KERNEL_CPU_BASE);
+        host_write(GPU_BASE + 32'h0c, 32'd16);
+        host_write(GPU_BASE + 32'h10, 32'h0003_0004);
+        host_write(GPU_BASE + 32'h14, 32'haabb_ccdd);
+        host_write(GPU_BASE + 32'h00, 32'h0000_0011);
+        host_read(KERNEL_CPU_BASE, gpu_first_word);
+        if (gpu_first_word !== 32'haabb_ccdd) begin
+            $fatal(1, "host DDR read overlapped with GPU write incorrectly: got %08x",
+                   gpu_first_word);
+        end
+        repeat (200) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU clear failed, status=%08x", gpu_status);
+        end
+        for (int i = 0; i < 12; i++) begin
+            if (kernel_mem[i] !== 32'haabb_ccdd) begin
+                $fatal(1, "GPU clear word %0d mismatch: %08x", i, kernel_mem[i]);
+            end
+        end
+
+        host_write(GPU_BASE + 32'h14, 32'h1122_3344);
+        host_write(GPU_BASE + 32'h18, 32'h0001_0001);
+        host_write(GPU_BASE + 32'h1c, 32'h0001_0002);
+        host_write(GPU_BASE + 32'h00, 32'h0000_0021);
+        repeat (200) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU fill-rect failed, status=%08x", gpu_status);
+        end
+        if (kernel_mem[5] !== 32'h1122_3344 || kernel_mem[6] !== 32'h1122_3344) begin
+            $fatal(1, "GPU fill-rect pixels mismatch: mem[5]=%08x mem[6]=%08x",
+                   kernel_mem[5], kernel_mem[6]);
+        end
+        if (kernel_mem[4] !== 32'haabb_ccdd || kernel_mem[7] !== 32'haabb_ccdd) begin
+            $fatal(1, "GPU fill-rect over-wrote neighboring pixels: mem[4]=%08x mem[7]=%08x",
+                   kernel_mem[4], kernel_mem[7]);
+        end
+
+        host_write(GPU_BASE + 32'h14, 32'h5566_7788);
+        host_write(GPU_BASE + 32'h18, 32'h0002_0000);
+        host_write(GPU_BASE + 32'h1c, 32'h0000_0003);
+        host_write(GPU_BASE + 32'h00, 32'h0000_0031);
+        repeat (200) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU draw-line failed, status=%08x", gpu_status);
+        end
+        if (kernel_mem[8] !== 32'h5566_7788 ||
+            kernel_mem[5] !== 32'h5566_7788 ||
+            kernel_mem[6] !== 32'h5566_7788 ||
+            kernel_mem[3] !== 32'h5566_7788) begin
+            $fatal(1, "GPU draw-line pixels mismatch: mem[8]=%08x mem[5]=%08x mem[6]=%08x mem[3]=%08x",
+                   kernel_mem[8], kernel_mem[5], kernel_mem[6], kernel_mem[3]);
+        end
+
+        host_write(GPU_BASE + 32'h00, 32'h8000_0000);
+        for (int i = 0; i < 12; i++) begin
+            kernel_mem[i] = 32'd0;
+        end
+        host_write(GPU_BASE + 32'h08, KERNEL_CPU_BASE);
+        host_write(GPU_BASE + 32'h0c, 32'd16);
+        host_write(GPU_BASE + 32'h10, 32'h0003_0004);
+        host_write(GPU_BASE + 32'h14, 32'h0102_0304);
+        host_write(GPU_BASE + 32'h34, 32'h0000_0011);
+        host_write(GPU_BASE + 32'h14, 32'h0506_0708);
+        host_write(GPU_BASE + 32'h18, 32'h0001_0001);
+        host_write(GPU_BASE + 32'h1c, 32'h0001_0002);
+        host_write(GPU_BASE + 32'h34, 32'h0000_0021);
+        host_write(GPU_BASE + 32'h14, 32'h090a_0b0c);
+        host_write(GPU_BASE + 32'h18, 32'h0002_0000);
+        host_write(GPU_BASE + 32'h1c, 32'h0000_0003);
+        host_write(GPU_BASE + 32'h34, 32'h0000_0031);
+        repeat (300) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU fifo batch failed, status=%08x", gpu_status);
+        end
+        host_read(GPU_BASE + 32'h38, gpu_status);
+        if (gpu_status !== 32'd3) begin
+            $fatal(1, "GPU fifo done_count mismatch: %08x", gpu_status);
+        end
+        if (kernel_mem[8] !== 32'h090a_0b0c ||
+            kernel_mem[5] !== 32'h090a_0b0c ||
+            kernel_mem[6] !== 32'h090a_0b0c ||
+            kernel_mem[3] !== 32'h090a_0b0c) begin
+            $fatal(1, "GPU fifo line pixels mismatch: mem[8]=%08x mem[5]=%08x mem[6]=%08x mem[3]=%08x",
+                   kernel_mem[8], kernel_mem[5], kernel_mem[6], kernel_mem[3]);
+        end
+        if (kernel_mem[0] !== 32'h0102_0304 || kernel_mem[1] !== 32'h0102_0304) begin
+            $fatal(1, "GPU fifo clear pixels mismatch: mem[0]=%08x mem[1]=%08x",
+                   kernel_mem[0], kernel_mem[1]);
+        end
 
         host_write(CTRL_BASE, 32'd1);
 

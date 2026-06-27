@@ -15,6 +15,7 @@ Implemented and tested in the current tree:
 - Local boot/scratch memories and simple MMIO peripherals.
 - AXI DataMover control path for bulk DDR transfers through Zynq PS HP.
 - Direct serialized AXI4 master bridge for PL CPU load/store and instruction fetches from PS DDR, with multi-beat read refills behind the SoC I-cache/D-cache front end.
+- MMIO-controlled framebuffer fill renderer v0 for DDR clear and rectangle-fill tests.
 - PS-side bring-up probe that loads ZX32 assembly/ELF tests, starts the PL CPU, and reports PASS/FAIL over PS UART.
 
 Latest board-level bring-up has passed:
@@ -114,6 +115,7 @@ Run only one Icarus target:
 ./scripts/run_iverilog_tests.sh core
 ./scripts/run_iverilog_tests.sh irqctrl
 ./scripts/run_iverilog_tests.sh scratchpad
+./scripts/run_iverilog_tests.sh gpu
 ./scripts/run_iverilog_tests.sh soc
 ```
 
@@ -129,7 +131,13 @@ Build the Linux userspace memory benchmark into the Buildroot overlay:
 ./scripts/build_zx32_membench.sh
 ```
 
-After rebuilding the benchmark, rebuild the rootfs, kernel Image, and Linux boot artifacts before booting the board.
+Build the Linux userspace GPU smoke test into the Buildroot overlay:
+
+```sh
+./scripts/build_zx32_gpu_smoke.sh
+```
+
+After rebuilding a userspace test, rebuild the rootfs, kernel Image, and Linux boot artifacts before booting the board.
 
 Run the RTL-only Vivado synthesis check:
 

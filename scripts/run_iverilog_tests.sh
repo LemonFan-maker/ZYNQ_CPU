@@ -36,6 +36,16 @@ run_scratchpad() {
   vvp /tmp/axis_scratchpad_tb.vvp
 }
 
+run_gpu() {
+  iverilog -g2012 \
+    -I rtl/core \
+    -o /tmp/mmio_gpu_fill_tb.vvp \
+    rtl/periph/mmio_gpu_fill.sv \
+    tb/tb_mmio_gpu_fill.sv
+
+  vvp /tmp/mmio_gpu_fill_tb.vvp
+}
+
 run_soc() {
   iverilog -g2012 \
     -I rtl/core \
@@ -47,6 +57,7 @@ run_soc() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/periph/mmio_gpu_fill.sv \
     rtl/periph/axis_scratchpad.sv \
     rtl/bus/datamover_ctrl.sv \
     rtl/bus/axi4_master_bridge.sv \
@@ -67,6 +78,7 @@ run_soc_sv32() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/periph/mmio_gpu_fill.sv \
     rtl/periph/axis_scratchpad.sv \
     rtl/bus/datamover_ctrl.sv \
     rtl/bus/axi4_master_bridge.sv \
@@ -86,6 +98,9 @@ case "$target" in
   scratchpad)
     run_scratchpad
     ;;
+  gpu)
+    run_gpu
+    ;;
   soc)
     run_soc
     ;;
@@ -96,11 +111,12 @@ case "$target" in
     run_core
     run_irqctrl
     run_scratchpad
+    run_gpu
     run_soc
     run_soc_sv32
     ;;
   *)
-    echo "usage: $0 [core|irqctrl|scratchpad|soc|soc-sv32|all]" >&2
+    echo "usage: $0 [core|irqctrl|scratchpad|gpu|soc|soc-sv32|all]" >&2
     exit 2
     ;;
 esac

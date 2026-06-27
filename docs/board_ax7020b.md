@@ -51,7 +51,9 @@ Current hardware has two DDR access paths from PL:
 - AXI DataMover through PS HP for bulk block transfers
 - direct serialized AXI4 master bridge for PL CPU load/store/fetch, with multi-beat read refills used by the SoC I-cache/D-cache front end
 
-Both paths have passed board smoke tests.
+The GPU fill renderer v0 also writes framebuffers through the direct DDR bridge, but it is currently validated by RTL/SoC simulation rather than a board-rendering demo.
+
+Both original DDR paths have passed board smoke tests.
 
 ## Hardware Outputs
 

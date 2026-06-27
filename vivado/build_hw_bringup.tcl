@@ -33,6 +33,7 @@ read_verilog -sv [file join $repo_dir rtl periph simple_ram.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_uart_tx.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_timer.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_irqctrl.sv]
+read_verilog -sv [file join $repo_dir rtl periph mmio_gpu_fill.sv]
 read_verilog -sv [file join $repo_dir rtl periph axis_scratchpad.sv]
 read_verilog -sv [file join $repo_dir rtl periph axi_lite_bringup_regs.sv]
 read_verilog -sv [file join $repo_dir rtl bus datamover_ctrl.sv]
@@ -176,6 +177,7 @@ if {[get_property STATUS [get_runs synth_1]] ne "synth_design Complete!"} {
     error "synth_1 failed: [get_property STATUS [get_runs synth_1]]"
 }
 
+set_property strategy Performance_ExplorePostRoutePhysOpt [get_runs impl_1]
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
 if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {

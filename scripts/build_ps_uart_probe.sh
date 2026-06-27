@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+unset LD_LIBRARY_PATH
+unset PYTHONPATH
+unset PERL5LIB
+unset RUBYLIB
+unset CMAKE_PREFIX_PATH
 probe_srcs=(
     "$repo_dir/hw_bringup/ps_uart_probe.c"
     "$repo_dir/hw_bringup/ps_uart_probe_common.c"

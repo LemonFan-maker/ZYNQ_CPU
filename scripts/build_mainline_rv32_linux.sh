@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+unset LD_LIBRARY_PATH
+unset PYTHONPATH
+unset PERL5LIB
+unset RUBYLIB
+unset CMAKE_PREFIX_PATH
 linux_src="${LINUX_SRC:-$repo_dir/linux/kernel}"
 linux_out="${LINUX_OUT:-$repo_dir/build/linux-mainline-rv32}"
 fragment="${LINUX_CONFIG_FRAGMENT:-$repo_dir/linux/zx32_rv32.config}"
@@ -15,6 +20,19 @@ if [[ ! -d "$linux_src" ]]; then
     echo "Linux source not found: $linux_src" >&2
     echo "Run scripts/prepare_mainline_linux.sh first, or set LINUX_SRC." >&2
     exit 2
+fi
+
+if [[ -z "${CROSS_COMPILE:-}" ]]; then
+    for prefix in \
+        "$repo_dir/build/buildroot-zx32/host/bin/riscv32-buildroot-linux-musl-" \
+        "$repo_dir/build/buildroot-zx32/host/bin/riscv32-linux-" \
+        "$repo_dir/build/buildroot-zx32/host/bin/riscv32-buildroot-linux-gnu-" \
+        "$repo_dir/build/buildroot-zx32/host/bin/riscv32-linux-gnu-"; do
+        if [[ -x "${prefix}gcc" ]]; then
+            CROSS_COMPILE="$prefix"
+            break
+        fi
+    done
 fi
 
 if [[ -z "${CROSS_COMPILE:-}" ]]; then

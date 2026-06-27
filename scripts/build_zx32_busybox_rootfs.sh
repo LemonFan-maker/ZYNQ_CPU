@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+unset LD_LIBRARY_PATH
+unset PYTHONPATH
+unset PERL5LIB
+unset RUBYLIB
+unset CMAKE_PREFIX_PATH
 
 br_version="${BUILDROOT_VERSION:-2026.05-rc2}"
 br_url="${BUILDROOT_URL:-https://buildroot.org/downloads/buildroot-${br_version}.tar.gz}"

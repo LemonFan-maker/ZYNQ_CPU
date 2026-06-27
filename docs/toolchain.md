@@ -19,7 +19,7 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | Script | Purpose |
 | --- | --- |
 | `scripts/run_all_tests.sh` | run Python tool tests and all Icarus RTL tests |
-| `scripts/run_iverilog_tests.sh` | run `core`, `irqctrl`, `scratchpad`, `soc`, or `all` Icarus tests |
+| `scripts/run_iverilog_tests.sh` | run `core`, `irqctrl`, `scratchpad`, `gpu`, `soc`, `soc-sv32`, or `all` Icarus tests |
 | `scripts/run_zx32_toolchain_tests.sh` | run assembler and ELF unit tests |
 | `scripts/run_zx32sim_smokes.sh` | run ZX32 functional simulator smoke tests |
 | `scripts/run_zx32sim_linux_early.sh` | boot the Linux Image/DTB/SBI firmware in the functional simulator |
@@ -27,6 +27,7 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
 | `scripts/build_zx32_membench.sh` | build the Linux userspace DDR/cache benchmark into the Buildroot overlay |
+| `scripts/build_zx32_gpu_smoke.sh` | build the Linux userspace GPU framebuffer smoke test into the Buildroot overlay |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
 | `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as Linux initramfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
@@ -61,6 +62,7 @@ Run one RTL simulation target:
 ./scripts/run_iverilog_tests.sh core
 ./scripts/run_iverilog_tests.sh irqctrl
 ./scripts/run_iverilog_tests.sh scratchpad
+./scripts/run_iverilog_tests.sh gpu
 ./scripts/run_iverilog_tests.sh soc
 ```
 
@@ -112,7 +114,13 @@ Build the Linux userspace memory benchmark into the Buildroot overlay:
 ./scripts/build_zx32_membench.sh
 ```
 
-The benchmark binary is written to the Buildroot overlay as `usr/bin/zx32_membench`. Rebuild the rootfs and kernel Image after running this script:
+Build the Linux userspace GPU smoke test into the Buildroot overlay:
+
+```sh
+./scripts/build_zx32_gpu_smoke.sh
+```
+
+The test binaries are written to the Buildroot overlay as `usr/bin/zx32_membench` and `usr/bin/zx32_gpu_smoke`. Rebuild the rootfs and kernel Image after running either script:
 
 ```sh
 ./scripts/build_zx32_busybox_rootfs.sh
@@ -120,6 +128,14 @@ The benchmark binary is written to the Buildroot overlay as `usr/bin/zx32_memben
 ./scripts/prepare_linux_boot_artifacts.sh
 ./scripts/build_ps_uart_probe.sh
 ```
+
+On the target, run:
+
+```sh
+zx32_gpu_smoke
+```
+
+The default framebuffer smoke address is `0x83f00000`, reserved by the board and simulator DTS files.
 
 Prepare and build the current Linux boot artifacts:
 

@@ -63,6 +63,7 @@ These addresses are seen by software running on the PL CPU.
 | DataMover control | `0x1002_0000` | bulk DDR DMA command/status registers |
 | CPU control | `0x1003_0000` | reset/status/sizing control block |
 | Interrupt controller | `0x1004_0000` | pending/enable/threshold/claim registers |
+| GPU fill renderer | `0x1007_0000` | framebuffer clear/fill-rectangle test accelerator |
 | Scratchpad | `0x2000_0000` | CPU and DataMover local stream endpoint |
 | PS DDR window | `0x8000_0000` | direct DDR load/store/fetch window |
 
@@ -85,6 +86,39 @@ PL CPU 0x8000_0000 -> PS physical 0x0010_0000
 The bridge currently issues serialized AXI4 requests behind the SoC memory front end. DDR instruction and data reads are cached in small direct-mapped line caches, while raw writes still go to DDR and invalidate the matching cache line. The D-cache also has a conservative next-line prefetch path for sequential DDR read misses. Prefetch is stream-gated so random reads do not continuously pull useless cache lines from DDR.
 
 This is enough for the current Linux and Buildroot path, but it is still a simple bring-up memory system rather than a high-performance coherent cache hierarchy.
+
+## GPU Fill Renderer v0
+
+`rtl/periph/mmio_gpu_fill.sv` implements the first rendering coprocessor milestone. It is a fixed-function MMIO device, not a programmable GPU.
+
+The v0 renderer can:
+
+- clear a 32-bit-per-pixel framebuffer
+- fill an axis-aligned rectangle
+- write pixels to the PS DDR window through the existing SoC DDR bridge
+- expose busy/done/error status through MMIO polling
+
+PL CPU base address: `0x1007_0000`
+
+The board and simulator DTS files reserve `0x83f0_0000..0x83ff_ffff` for GPU smoke-test framebuffer use. `hw_bringup/userspace/gpu_smoke/zx32_gpu_smoke.c` maps that region with `/dev/mem` by default.
+
+| Offset | Register | Description |
+| ---: | --- | --- |
+| `0x00` | control | write bit 0 to start; bits `[7:4]` opcode: `1=clear`, `2=fill_rect`; bit 31 soft-resets renderer state |
+| `0x04` | status | bit 0 busy, bit 1 done, bit 2 error; write one to bits 1/2 to clear sticky status |
+| `0x08` | framebuffer address | CPU-visible DDR framebuffer base, expected in the `0x8...` DDR window |
+| `0x0c` | framebuffer stride | bytes per framebuffer row |
+| `0x10` | framebuffer size | `{height[15:0], width[15:0]}` in 32-bit pixels |
+| `0x14` | color | 32-bit pixel value written by clear/fill |
+| `0x18` | rect origin | `{y[15:0], x[15:0]}` |
+| `0x1c` | rect size | `{height[15:0], width[15:0]}` |
+| `0x20` | current pixel | debug readback `{y[15:0], x[15:0]}` |
+
+The renderer only issues DDR writes when the CPU demand path and D-cache prefetch path are idle. GPU writes invalidate matching I-cache and D-cache lines so CPU readback does not reuse stale cached data.
+
+While the renderer is busy, configuration writes are ignored. Status W1C writes and the control soft-reset bit remain accepted.
+
+The current RTL tests cover direct module operation and SoC-level DDR writeback through the AXI bridge. A Linux userspace smoke binary can configure the renderer through `/dev/mem`, but board execution is still the next validation step. Triangle rasterization, texture reads, interrupts, and Linux drivers are not implemented yet.
 
 ## PS-Side AXI Register Windows
 
