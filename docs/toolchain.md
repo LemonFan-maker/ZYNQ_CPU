@@ -135,7 +135,7 @@ On the target, run:
 zx32_gpu_smoke
 ```
 
-The default framebuffer smoke address is `0x83f00000`, reserved by the board and simulator DTS files.
+The default framebuffer smoke address is `0xbc000000`, reserved as a 64 MiB VRAM region by the board and simulator DTS files.
 
 Prepare and build the current Linux boot artifacts:
 

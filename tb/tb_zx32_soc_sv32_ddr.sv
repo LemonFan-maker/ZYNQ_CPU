@@ -77,8 +77,8 @@ module tb_zx32_soc_sv32_ddr;
     localparam logic [31:0] IMEM_BASE = 32'h0000_0000;
     localparam logic [31:0] KERNEL_CPU_BASE = 32'h8040_0000;
     localparam logic [31:0] ROOT_CPU_BASE = 32'h8080_0000;
-    localparam logic [31:0] KERNEL_PS_BASE = 32'h0050_0000;
-    localparam logic [31:0] ROOT_PS_BASE = 32'h0090_0000;
+    localparam logic [31:0] KERNEL_PS_BASE = 32'h0040_0000;
+    localparam logic [31:0] ROOT_PS_BASE = 32'h0080_0000;
     localparam logic [31:0] TRAP_MARKER_CPU = KERNEL_CPU_BASE + 32'h200;
     localparam logic [31:0] ROOT_VIRT_PTE = 32'h2010_00cf;
 

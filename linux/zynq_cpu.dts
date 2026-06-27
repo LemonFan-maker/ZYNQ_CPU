@@ -12,7 +12,7 @@
 
     memory@80000000 {
         device_type = "memory";
-        reg = <0x80000000 0x04000000>;
+        reg = <0x80000000 0x40000000>;
     };
 
     reserved-memory {
@@ -20,8 +20,13 @@
         #size-cells = <1>;
         ranges;
 
-        gpu_smoke_fb: framebuffer@83f00000 {
-            reg = <0x83f00000 0x00100000>;
+        boot_artifacts_backup: boot-artifacts@84100000 {
+            reg = <0x84100000 0x01300000>;
+            no-map;
+        };
+
+        gpu_smoke_fb: framebuffer@bc000000 {
+            reg = <0xbc000000 0x04000000>;
             no-map;
         };
     };

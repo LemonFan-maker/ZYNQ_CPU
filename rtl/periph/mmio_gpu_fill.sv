@@ -138,12 +138,12 @@ module mmio_gpu_fill (
                                 rect_w_q >= fb_width_q || rect_h_q >= fb_height_q;
     assign invalid_start = busy_q ||
                            unsupported_op ||
-                           fb_addr_q[31:28] != 4'h8 ||
+                           fb_addr_q[31:30] != 2'b10 ||
                            fb_stride_q == 32'd0 ||
                            (op_is_draw_line ? invalid_line_start : invalid_rect_start);
     assign invalid_submit = fifo_count_q == CMD_FIFO_DEPTH_U ||
                             unsupported_op ||
-                            fb_addr_q[31:28] != 4'h8 ||
+                            fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (op_is_draw_line ? invalid_line_start : invalid_rect_start);
 
@@ -171,7 +171,7 @@ module mmio_gpu_fill (
                                  launch_w >= fb_width_q || launch_h >= fb_height_q;
     assign launch_invalid = (start_req && engine_busy) ||
                             launch_unsupported ||
-                            fb_addr_q[31:28] != 4'h8 ||
+                            fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (launch_is_draw_line ? launch_invalid_line : launch_invalid_rect);
 

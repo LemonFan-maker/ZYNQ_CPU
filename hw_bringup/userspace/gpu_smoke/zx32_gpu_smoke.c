@@ -13,7 +13,7 @@
 #define GPU_BASE_DEFAULT 0x10070000UL
 #define GPU_SIZE         0x1000UL
 
-#define FB_BASE_DEFAULT  0x83f00000UL
+#define FB_BASE_DEFAULT  0xbc000000UL
 #define FB_WIDTH         8u
 #define FB_HEIGHT        4u
 #define FB_STRIDE        (FB_WIDTH * 4u)

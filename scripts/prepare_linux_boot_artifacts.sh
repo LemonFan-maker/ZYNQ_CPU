@@ -12,9 +12,9 @@ sim_dtb_out="${LINUX_SIM_DTB:-$artifact_dir/zx32sim_virtio.dtb}"
 manifest="$artifact_dir/boot_artifacts.env"
 
 kernel_cpu_addr="0x80400000"
-kernel_ps_addr="0x00500000"
+kernel_ps_addr="0x00400000"
 dtb_cpu_addr="0x81600000"
-dtb_ps_addr="0x01700000"
+dtb_ps_addr="0x01600000"
 
 if [[ ! -f "$image" ]]; then
     echo "Linux Image not found: $image" >&2

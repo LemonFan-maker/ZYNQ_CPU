@@ -346,7 +346,7 @@ int run_cpu_linux_contract_smoke_test(void)
     cpu_linux_contract[dtb_word_offset + 30U] = 0x08000000U;
     cpu_linux_contract[dtb_word_offset + 31U] = 0x1B000000U;
     cpu_linux_contract[dtb_word_offset + 32U] = 0x00000080U;
-    cpu_linux_contract[dtb_word_offset + 33U] = 0x00000004U;
+    cpu_linux_contract[dtb_word_offset + 33U] = 0x00000040U;
     cpu_linux_contract[dtb_word_offset + 34U] = 0x02000000U;
     cpu_linux_contract[dtb_word_offset + 35U] = 0x02000000U;
     cpu_linux_contract[dtb_word_offset + 36U] = 0x09000000U;
@@ -487,7 +487,7 @@ int run_cpu_linux_contract_smoke_test(void)
         size_cells != 1U ||
         fdt_memory != 1U ||
         reg_addr != 0x80000000U ||
-        reg_size != 0x04000000U ||
+        reg_size != 0x40000000U ||
         base_version != 2U ||
         scause != 0x80000005U) {
         return -1;

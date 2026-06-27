@@ -139,7 +139,7 @@ python3 -m tools.zx32sim.main "$build_dir/linux_contract_firmware_smoke.elf" \
     --expect-word 0x2001035c=1 \
     --expect-word 0x20010360=1 \
     --expect-word 0x20010364=0x80000000 \
-    --expect-word 0x20010368=0x04000000 \
+    --expect-word 0x20010368=0x40000000 \
     --expect-word 0x200103f0=0x222
 
 python3 "$repo_dir/tools/zx32elf.py" \

@@ -44,7 +44,8 @@ Current DDR assumptions:
 - target device: `MT41K256M16RE-125`
 - data width: 32-bit
 - PL CPU virtual/CPU DDR base: `0x8000_0000`
-- PS physical DDR base used by the bridge: `0x0010_0000`
+- PS physical DDR base used by the bridge: `0x0000_0000`
+- Linux-visible CPU DDR size: 1 GiB, with 64 MiB reserved as GPU framebuffer VRAM
 
 Current hardware has two DDR access paths from PL:
 

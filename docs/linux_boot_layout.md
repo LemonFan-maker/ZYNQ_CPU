@@ -7,26 +7,28 @@ This is the current board-used layout for the real Linux boot launcher. It match
 Current direct DDR bridge mapping:
 
 ```text
-PL CPU address = PS physical address - 0x0010_0000 + 0x8000_0000
-PS physical    = PL CPU address - 0x8000_0000 + 0x0010_0000
+PL CPU address = PS physical address + 0x8000_0000
+PS physical    = PL CPU address - 0x8000_0000
 ```
 
 Examples:
 
 | PL CPU address | PS physical address |
 | ---: | ---: |
-| `0x8000_0000` | `0x0010_0000` |
-| `0x8020_0000` | `0x0030_0000` |
-| `0x8040_0000` | `0x0050_0000` |
-| `0x8160_0000` | `0x0170_0000` |
+| `0x8000_0000` | `0x0000_0000` |
+| `0x8020_0000` | `0x0020_0000` |
+| `0x8040_0000` | `0x0040_0000` |
+| `0x8160_0000` | `0x0160_0000` |
 
 ## Current Image Placement
 
 | Image or region | PL CPU address | PS physical address | Notes |
 | --- | ---: | ---: | --- |
 | M-mode firmware | `0x0000_0000` | PS writes through IMEM aperture | `linux_boot_firmware.zx32.s` |
-| Linux kernel Image | `0x8040_0000` | `0x0050_0000` | RISC-V Image with text offset `0x0040_0000` |
-| DTB | `0x8160_0000` | `0x0170_0000` | built from `linux/zynq_cpu.dts` |
+| Linux kernel Image | `0x8040_0000` | `0x0040_0000` | RISC-V Image with text offset `0x0040_0000` |
+| DTB | `0x8160_0000` | `0x0160_0000` | built from `linux/zynq_cpu.dts` |
+| GPU framebuffer reserve | `0xbc00_0000` | `0x3c00_0000` | 64 MiB `no-map` VRAM |
+| boot artifact backup | `0x8410_0000` | `0x0410_0000` | 19 MiB `no-map` PS launcher backup |
 | initramfs | embedded in Image | embedded in Image | Buildroot `build/buildroot-zx32/images/rootfs.cpio` |
 | SBI console/counter scratch | `0x2001_0000` | AXI-Lite TX scratch aperture | PS-visible mailbox and ring |
 | MMIO timer | `0x1001_0000` | PL CPU MMIO | `mtime` and `mtimecmp` |
@@ -47,9 +49,9 @@ It writes `build/linux/boot_artifacts.env` with the active addresses:
 
 ```text
 KERNEL_CPU_ADDR=0x80400000
-KERNEL_PS_ADDR=0x00500000
+KERNEL_PS_ADDR=0x00400000
 DTB_CPU_ADDR=0x81600000
-DTB_PS_ADDR=0x01700000
+DTB_PS_ADDR=0x01600000
 ```
 
 ## Entry Convention

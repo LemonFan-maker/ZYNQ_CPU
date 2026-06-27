@@ -80,7 +80,7 @@ These devices are not part of the current board platform ABI. The board DTB does
 The DDR window is translated by `rtl/bus/axi4_master_bridge.sv`:
 
 ```text
-PL CPU 0x8000_0000 -> PS physical 0x0010_0000
+PL CPU 0x8000_0000 -> PS physical 0x0000_0000
 ```
 
 The bridge currently issues serialized AXI4 requests behind the SoC memory front end. DDR instruction and data reads are cached in small direct-mapped line caches, while raw writes still go to DDR and invalidate the matching cache line. The D-cache also has a conservative next-line prefetch path for sequential DDR read misses. Prefetch is stream-gated so random reads do not continuously pull useless cache lines from DDR.
@@ -100,13 +100,13 @@ The v0 renderer can:
 
 PL CPU base address: `0x1007_0000`
 
-The board and simulator DTS files reserve `0x83f0_0000..0x83ff_ffff` for GPU smoke-test framebuffer use. `hw_bringup/userspace/gpu_smoke/zx32_gpu_smoke.c` maps that region with `/dev/mem` by default.
+The board and simulator DTS files expose a 1 GiB CPU DDR window and reserve `0xbc00_0000..0xbfff_ffff` as a 64 MiB GPU framebuffer region. `hw_bringup/userspace/gpu_smoke/zx32_gpu_smoke.c` maps that region with `/dev/mem` by default.
 
 | Offset | Register | Description |
 | ---: | --- | --- |
 | `0x00` | control | write bit 0 to start; bits `[7:4]` opcode: `1=clear`, `2=fill_rect`; bit 31 soft-resets renderer state |
 | `0x04` | status | bit 0 busy, bit 1 done, bit 2 error; write one to bits 1/2 to clear sticky status |
-| `0x08` | framebuffer address | CPU-visible DDR framebuffer base, expected in the `0x8...` DDR window |
+| `0x08` | framebuffer address | CPU-visible DDR framebuffer base, expected in the `0x8000_0000..0xbfff_ffff` DDR window |
 | `0x0c` | framebuffer stride | bytes per framebuffer row |
 | `0x10` | framebuffer size | `{height[15:0], width[15:0]}` in 32-bit pixels |
 | `0x14` | color | 32-bit pixel value written by clear/fill |

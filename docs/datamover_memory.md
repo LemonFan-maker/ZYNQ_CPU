@@ -15,7 +15,7 @@ PL CPU instruction/data request
 The direct bridge maps:
 
 ```text
-PL CPU 0x8000_0000 -> PS physical 0x0010_0000
+PL CPU 0x8000_0000 -> PS physical 0x0000_0000
 ```
 
 Current behavior:

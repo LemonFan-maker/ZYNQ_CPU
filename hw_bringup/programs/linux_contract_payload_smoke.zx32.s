@@ -270,7 +270,7 @@
     srli t3, t0, 24
     or t2, t2, t3
     sw t2, 872(s0)
-    li t1, 0x04000000
+    li t1, 0x40000000
     bne t2, t1, fail
 
     li a6, 0

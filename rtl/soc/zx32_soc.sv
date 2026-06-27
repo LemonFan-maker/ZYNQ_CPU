@@ -308,7 +308,7 @@ module zx32_soc #(
     assign irq_valid = bus_valid && bus_addr[31:12] == IRQ_BASE[31:12];
     assign gpu_valid = bus_valid && bus_addr[31:12] == GPU_BASE[31:12];
     assign scratch_valid = bus_valid && bus_addr[31:20] == SCRATCH_BASE[31:20];
-    assign bus_ddr_raw_selected = bus_valid && bus_addr[31:28] == 4'h8;
+    assign bus_ddr_raw_selected = bus_valid && bus_addr[31:30] == 2'b10;
     assign dmem_ddr_raw_selected = !host_valid && bus_ddr_raw_selected;
     assign dmem_ddr_read_selected = dmem_ddr_raw_selected && !bus_we;
     assign dcache_index = bus_addr[DCACHE_INDEX_BITS+1:2];
@@ -325,7 +325,7 @@ module zx32_soc #(
     assign ddr_valid = dcache_miss_valid ||
                        (bus_ddr_raw_selected && !dcache_check_active && !(dmem_ddr_read_selected && dcache_resp_valid));
     assign bram_imem_valid = imem_valid && imem_addr[31:16] == 16'h0000;
-    assign imem_ddr_raw_selected = !bus_ddr_raw_selected && !icache_miss_valid && imem_valid && imem_addr[31:28] == 4'h8;
+    assign imem_ddr_raw_selected = !bus_ddr_raw_selected && !icache_miss_valid && imem_valid && imem_addr[31:30] == 2'b10;
     assign icache_index = imem_addr[ICACHE_INDEX_BITS+1:2];
     assign icache_line_base_index = {imem_addr[ICACHE_INDEX_BITS+1:5], 3'b000};
     assign icache_tag = imem_addr[31:ICACHE_INDEX_BITS+2];
@@ -637,7 +637,7 @@ module zx32_soc #(
                     dcache_miss_valid <= 1'b0;
                     dcache_resp_valid <= 1'b1;
                     dcache_resp_rdata <= dcache_live_rdata;
-                    if (dcache_miss_stream && dcache_miss_addr[31:28] == 4'h8) begin
+                    if (dcache_miss_stream && dcache_miss_addr[31:30] == 2'b10) begin
                         dcache_prefetch_valid <= 1'b1;
                         dcache_prefetch_inflight <= 1'b0;
                         dcache_prefetch_addr <= dcache_next_line_addr;
@@ -898,7 +898,7 @@ module zx32_soc #(
 
     axi4_master_bridge #(
         .CPU_BASE_ADDR(DDR_BASE),
-        .PHYS_BASE_ADDR(32'h0010_0000)
+        .PHYS_BASE_ADDR(32'h0000_0000)
     ) u_ddr_bridge (
         .clk(clk),
         .rst_n(rst_n),

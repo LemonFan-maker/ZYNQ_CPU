@@ -3,7 +3,7 @@ module axi4_master_bridge #(
     parameter int  AXI_ADDR_WIDTH = 32,
     parameter int  AXI_DATA_WIDTH = 32,
     parameter logic [31:0] CPU_BASE_ADDR  = 32'h8000_0000,
-    parameter logic [31:0] PHYS_BASE_ADDR = 32'h0010_0000
+    parameter logic [31:0] PHYS_BASE_ADDR = 32'h0000_0000
 ) (
     input  logic clk,
     input  logic rst_n,
