@@ -2,6 +2,20 @@ module zx32_soc_bd (
     input  wire        clk,
     input  wire        rst_n,
     output wire        uart_tx,
+    output wire        display_enable,
+    output wire        display_test_pattern_enable,
+    output wire        display_text_enable,
+    output wire        display_text_clear,
+    output wire [1:0]  display_mode,
+    output wire [31:0] display_bg_color,
+    output wire        display_text_we,
+    output wire [11:0] display_text_word_addr,
+    output wire [31:0] display_text_wdata,
+    output wire [3:0]  display_text_wstrb,
+    output wire        display_font_we,
+    output wire [8:0]  display_font_word_addr,
+    output wire [31:0] display_font_wdata,
+    output wire [3:0]  display_font_wstrb,
 
     input  wire        S_AXI_ACLK,
     input  wire        S_AXI_ARESETN,
@@ -134,6 +148,13 @@ module zx32_soc_bd (
                 4'h6: translate_addr = {16'd0, axi_addr - 16'h3000};
                 4'h7: translate_addr = 32'h1003_0000 + {20'd0, axi_addr[11:0]};
                 4'h8: translate_addr = 32'h1001_0000 + {20'd0, axi_addr[11:0]};
+                4'h9,
+                4'ha,
+                4'hb,
+                4'hc,
+                4'hd,
+                4'he,
+                4'hf: translate_addr = 32'h1008_0000 + {16'd0, axi_addr - 16'h9000};
                 default: translate_addr = 32'hffff_0000 + {16'd0, axi_addr};
             endcase
         end
@@ -197,6 +218,20 @@ module zx32_soc_bd (
         .clk(clk),
         .rst_n(rst_n),
         .uart_tx(uart_tx),
+        .display_enable_o(display_enable),
+        .display_test_pattern_enable_o(display_test_pattern_enable),
+        .display_text_enable_o(display_text_enable),
+        .display_text_clear_o(display_text_clear),
+        .display_mode_o(display_mode),
+        .display_bg_color_o(display_bg_color),
+        .display_text_we_o(display_text_we),
+        .display_text_word_addr_o(display_text_word_addr),
+        .display_text_wdata_o(display_text_wdata),
+        .display_text_wstrb_o(display_text_wstrb),
+        .display_font_we_o(display_font_we),
+        .display_font_word_addr_o(display_font_word_addr),
+        .display_font_wdata_o(display_font_wdata),
+        .display_font_wstrb_o(display_font_wstrb),
         .host_valid(host_valid),
         .host_we(host_we),
         .host_wstrb(host_wstrb),

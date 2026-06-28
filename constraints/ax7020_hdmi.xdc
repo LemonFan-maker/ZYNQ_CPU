@@ -1,0 +1,10 @@
+set_property PACKAGE_PIN U13 [get_ports HDMI_CLK_P]
+set_property PACKAGE_PIN V13 [get_ports HDMI_CLK_N]
+set_property PACKAGE_PIN W14 [get_ports HDMI_D0_P]
+set_property PACKAGE_PIN Y14 [get_ports HDMI_D0_N]
+set_property PACKAGE_PIN Y18 [get_ports HDMI_D1_P]
+set_property PACKAGE_PIN Y19 [get_ports HDMI_D1_N]
+set_property PACKAGE_PIN Y16 [get_ports HDMI_D2_P]
+set_property PACKAGE_PIN Y17 [get_ports HDMI_D2_N]
+
+set_property IOSTANDARD TMDS_33 [get_ports {HDMI_CLK_P HDMI_CLK_N HDMI_D0_P HDMI_D0_N HDMI_D1_P HDMI_D1_N HDMI_D2_P HDMI_D2_N}]

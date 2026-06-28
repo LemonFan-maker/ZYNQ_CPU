@@ -93,6 +93,13 @@
             status = "okay";
         };
 
+        display0: display@10080000 {
+            compatible = "orion,zynq-cpu-display";
+            reg = <0x10080000 0x1000>;
+            memory-region = <&gpu_smoke_fb>;
+            status = "okay";
+        };
+
         plic0: interrupt-controller@c000000 {
             compatible = "sifive,plic-1.0.0";
             reg = <0x0c000000 0x00400000>;

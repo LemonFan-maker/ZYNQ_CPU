@@ -28,6 +28,9 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
 | `scripts/build_zx32_membench.sh` | build the Linux userspace DDR/cache benchmark into the Buildroot overlay |
 | `scripts/build_zx32_gpu_smoke.sh` | build the Linux userspace GPU framebuffer smoke test into the Buildroot overlay |
+| `scripts/build_zx32_image_viewer.sh` | build the Linux userspace framebuffer image viewer into the Buildroot overlay |
+| `scripts/download_zx32_vram_file.sh` | download a raw framebuffer image to the reserved VRAM window through XSCT/JTAG |
+| `scripts/dump_zx32_vram_ppm.sh` | read the reserved VRAM window through XSCT/JTAG and convert it to PPM |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
 | `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as Linux initramfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
@@ -47,6 +50,8 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `tools/test_zx32elf.py` | ELF packer unit tests |
 | `tools/zx32sim/` | Python functional simulator for RV32 ISA, traps, Sv32, SBI, Linux, and simple devices |
 | `tools/test_zx32sim.py` | simulator unit tests |
+| `tools/convert_image_xrgb.py` | convert host images to little-endian XRGB8888 raw framebuffer pixels |
+| `tools/xrgb_to_ppm.py` | convert little-endian XRGB8888 raw framebuffer pixels to PPM |
 
 ## Test Commands
 
@@ -120,7 +125,36 @@ Build the Linux userspace GPU smoke test into the Buildroot overlay:
 ./scripts/build_zx32_gpu_smoke.sh
 ```
 
-The test binaries are written to the Buildroot overlay as `usr/bin/zx32_membench` and `usr/bin/zx32_gpu_smoke`. Rebuild the rootfs and kernel Image after running either script:
+Build the Linux userspace framebuffer image viewer into the Buildroot overlay:
+
+```sh
+./scripts/build_zx32_image_viewer.sh
+```
+
+Host-side PNG/JPEG input should be converted to the board's raw framebuffer format before transfer:
+
+```sh
+python3 tools/convert_image_xrgb.py input.png /tmp/input.xrgb --size 1920x1080 --fit contain
+```
+
+For large images, prefer the XSCT/JTAG path and write the raw image directly to
+VRAM. The default PS address `0x3c000000` is the PS alias for CPU framebuffer
+address `0xbc000000`:
+
+```sh
+./scripts/download_zx32_vram_file.sh /tmp/input.xrgb
+```
+
+The same VRAM window can be read back through XSCT/JTAG without using the serial
+console. This example reads a 1920x1080 framebuffer and writes a 480x270 preview:
+
+```sh
+./scripts/dump_zx32_vram_ppm.sh /tmp/fb_preview.ppm 1920 1080 480 270
+```
+
+The test binaries are written to the Buildroot overlay as `usr/bin/zx32_membench`,
+`usr/bin/zx32_gpu_smoke`, and `usr/bin/zx32_image_viewer`. Rebuild the rootfs and
+kernel Image after running any of these scripts:
 
 ```sh
 ./scripts/build_zx32_busybox_rootfs.sh
@@ -133,6 +167,8 @@ On the target, run:
 
 ```sh
 zx32_gpu_smoke
+zx32_image_viewer raw /tmp/input.xrgb 1920 1080 /tmp/fb.ppm
+zx32_image_viewer dump 1920 1080 /tmp/fb_preview.ppm 480 270
 ```
 
 The default framebuffer smoke address is `0xbc000000`, reserved as a 64 MiB VRAM region by the board and simulator DTS files.

@@ -34,6 +34,14 @@ read_verilog -sv [file join $repo_dir rtl periph mmio_uart_tx.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_timer.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_irqctrl.sv]
 read_verilog -sv [file join $repo_dir rtl periph mmio_gpu_fill.sv]
+read_verilog -sv [file join $repo_dir rtl video video_timing.sv]
+read_verilog -sv [file join $repo_dir rtl video tmds_encoder.sv]
+read_verilog -sv [file join $repo_dir rtl video hdmi_test_pattern.sv]
+read_verilog -sv [file join $repo_dir rtl video hdmi_test_pattern_core.sv]
+read_verilog -sv [file join $repo_dir rtl video hdmi_text_console_core.sv]
+read_verilog -sv [file join $repo_dir rtl video mmio_display_ctrl.sv]
+read_verilog -sv [file join $repo_dir rtl video hdmi_tmds_oserdes_xilinx.sv]
+read_verilog [file join $repo_dir rtl video hdmi_test_pattern_top_xilinx.v]
 read_verilog -sv [file join $repo_dir rtl periph axis_scratchpad.sv]
 read_verilog -sv [file join $repo_dir rtl periph axi_lite_bringup_regs.sv]
 read_verilog -sv [file join $repo_dir rtl bus datamover_ctrl.sv]
@@ -52,6 +60,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_ps7_0_75M
 
 create_bd_cell -type module -reference zx32_soc_bd zx32_soc_0
 create_bd_cell -type module -reference axi_lite_bringup_regs_bd bringup_regs_0
+create_bd_cell -type module -reference hdmi_test_pattern_top_xilinx hdmi_test_0
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_datamover:5.1 axi_datamover_0
 set_property -dict [list \
@@ -86,6 +95,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins process
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins rst_ps7_0_75M/slowest_sync_clk]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins zx32_soc_0/clk]
+connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins hdmi_test_0/clk_75mhz]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins zx32_soc_0/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins bringup_regs_0/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins axi_ctrl_smc/aclk]
@@ -101,6 +111,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins axi_dat
 
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins rst_ps7_0_75M/ext_reset_in]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins zx32_soc_0/rst_n]
+connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins hdmi_test_0/rst_n]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins zx32_soc_0/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins bringup_regs_0/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins axi_ctrl_smc/aresetn]
@@ -148,6 +159,39 @@ connect_bd_net [get_bd_pins zx32_soc_0/dm_s_axis_s2mm_tlast] [get_bd_pins axi_da
 connect_bd_net [get_bd_pins zx32_soc_0/dm_s_axis_s2mm_tvalid] [get_bd_pins axi_datamover_0/s_axis_s2mm_tvalid]
 connect_bd_net [get_bd_pins zx32_soc_0/dm_s_axis_s2mm_tready] [get_bd_pins axi_datamover_0/s_axis_s2mm_tready]
 
+connect_bd_net [get_bd_pins zx32_soc_0/display_enable] [get_bd_pins hdmi_test_0/display_enable]
+connect_bd_net [get_bd_pins zx32_soc_0/display_test_pattern_enable] [get_bd_pins hdmi_test_0/test_pattern_enable]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_enable] [get_bd_pins hdmi_test_0/text_enable]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_clear] [get_bd_pins hdmi_test_0/text_clear]
+connect_bd_net [get_bd_pins zx32_soc_0/display_mode] [get_bd_pins hdmi_test_0/mode]
+connect_bd_net [get_bd_pins zx32_soc_0/display_bg_color] [get_bd_pins hdmi_test_0/bg_color]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_we] [get_bd_pins hdmi_test_0/text_we]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_word_addr] [get_bd_pins hdmi_test_0/text_word_addr]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_wdata] [get_bd_pins hdmi_test_0/text_wdata]
+connect_bd_net [get_bd_pins zx32_soc_0/display_text_wstrb] [get_bd_pins hdmi_test_0/text_wstrb]
+connect_bd_net [get_bd_pins zx32_soc_0/display_font_we] [get_bd_pins hdmi_test_0/font_we]
+connect_bd_net [get_bd_pins zx32_soc_0/display_font_word_addr] [get_bd_pins hdmi_test_0/font_word_addr]
+connect_bd_net [get_bd_pins zx32_soc_0/display_font_wdata] [get_bd_pins hdmi_test_0/font_wdata]
+connect_bd_net [get_bd_pins zx32_soc_0/display_font_wstrb] [get_bd_pins hdmi_test_0/font_wstrb]
+
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_P]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_N]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D0_P]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D0_N]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D1_P]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D1_N]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D2_P]
+make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D2_N]
+
+set_property name HDMI_CLK_P [get_bd_ports HDMI_CLK_P_0]
+set_property name HDMI_CLK_N [get_bd_ports HDMI_CLK_N_0]
+set_property name HDMI_D0_P [get_bd_ports HDMI_D0_P_0]
+set_property name HDMI_D0_N [get_bd_ports HDMI_D0_N_0]
+set_property name HDMI_D1_P [get_bd_ports HDMI_D1_P_0]
+set_property name HDMI_D1_N [get_bd_ports HDMI_D1_N_0]
+set_property name HDMI_D2_P [get_bd_ports HDMI_D2_P_0]
+set_property name HDMI_D2_N [get_bd_ports HDMI_D2_N_0]
+
 assign_bd_address
 set_property offset 0x43C00000 [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
 set_property range 64K [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
@@ -166,6 +210,7 @@ if {[info exists ::env(ZYNQ_CPU_VALIDATE_ONLY)] && $::env(ZYNQ_CPU_VALIDATE_ONLY
 set wrapper_path [make_wrapper -files [get_files [file join $build_dir zynq_cpu_hw.srcs sources_1 bd zynq_cpu_system zynq_cpu_system.bd]] -top]
 add_files -norecurse $wrapper_path
 set_property top zynq_cpu_system_wrapper [current_fileset]
+read_xdc [file join $repo_dir constraints ax7020_hdmi.xdc]
 update_compile_order -fileset sources_1
 
 launch_runs synth_1 -jobs 8

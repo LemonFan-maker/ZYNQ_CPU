@@ -39,8 +39,10 @@ These are already represented in code, tests, or board logs:
 - simulator WFI/timer fast-forward keeps Linux idle runs practical
 - Vivado 2025.2 bitstream generation with timing met at the current 75 MHz target
 - DDR read-side I-cache/D-cache behavior is active in the SoC, including stream-gated D-cache next-line prefetch for sequential read misses
-- GPU fill renderer v0 exists as an MMIO device for framebuffer clear and fill-rectangle DDR writeback tests
-- Linux userspace GPU smoke test exists as `zx32_gpu_smoke`, using `/dev/mem` and the reserved `0x83f0_0000` framebuffer region
+- GPU renderer v0 exists as an MMIO device for framebuffer clear, fill-rectangle, draw-line, and four-entry FIFO DDR writeback tests
+- Linux userspace GPU smoke test exists as `zx32_gpu_smoke`, using `/dev/mem` and the reserved `0xbc00_0000` framebuffer region
+- Linux userspace GPU demo and image viewer can write simple graphics or XRGB8888 images into the reserved VRAM region
+- host-side image conversion, XSCT/JTAG VRAM download, and PPM dump helpers exist for offline framebuffer preview
 
 ## Current Development Stage
 
@@ -169,6 +171,31 @@ Required work:
 - test direct DDR load/store with wider address and alignment cases
 - decide whether scratchpad memories should become explicit block RAMs
 
+## Next Milestone: HDMI Test Pattern Bring-Up
+
+Goal: move from offline VRAM dumps to a real monitor-lockable HDMI signal.
+
+Required work:
+
+- use AX7020 HDMI OUT on PL BANK34 as the physical display path
+- validate the 640x480 test-pattern output before attaching framebuffer scanout
+- keep EDID, audio, CEC, and dynamic mode selection out of the first board test
+- add HPD and HDMI output-enable pins once their exact AX7020 pins are confirmed in the board constraints
+- rerun Vivado implementation and check timing before treating the HDMI bitstream as board-ready
+
+## Next Milestone: Framebuffer Scanout
+
+Goal: continuously scan the reserved VRAM framebuffer to HDMI.
+
+Required work:
+
+- keep the default framebuffer at `0xbc00_0000` in little-endian XRGB8888
+- add an independent burst display-DMA read master instead of reusing the current serialized GPU write path
+- add at least double line buffering between AXI/DDR and pixel clock domains
+- bring modes up in order: 640x480@60, then 1280x720@60, then 1920x1080@60
+- expose underflow count, scan position, mode status, and framebuffer address through `0x1008_0000`
+- validate 1080p60 only when `underflow_count == 0` over a sustained board run
+
 ## Next Milestone: GPU Renderer Bring-Up
 
 Goal: turn the current RTL-level fill renderer into a useful Linux-visible rendering experiment.
@@ -176,10 +203,11 @@ Goal: turn the current RTL-level fill renderer into a useful Linux-visible rende
 Required work:
 
 - run `zx32_gpu_smoke` on board Linux and capture the PASS/fail signature
-- keep the reserved `0x83f0_0000` framebuffer smoke region until a real allocator contract is needed
+- run `zx32_gpu_demo` while HDMI scanout is enabled and confirm that the display updates from shared VRAM
+- keep the reserved `0xbc00_0000` framebuffer smoke region until a real allocator contract is needed
 - keep the GPU path polling-based until the interrupt contract is needed
 - rerun Vivado implementation before treating the renderer as board-ready
-- defer triangle rasterization until clear/fill has a board-level test
+- add blit/scale-blit/alpha blend before triangle rasterization
 
 ## Later Performance Work
 

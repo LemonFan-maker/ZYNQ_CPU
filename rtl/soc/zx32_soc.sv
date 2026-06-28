@@ -7,6 +7,20 @@ module zx32_soc #(
     input  logic rst_n,
 
     output logic uart_tx,
+    output logic display_enable_o,
+    output logic display_test_pattern_enable_o,
+    output logic display_text_enable_o,
+    output logic display_text_clear_o,
+    output logic [1:0] display_mode_o,
+    output logic [31:0] display_bg_color_o,
+    output logic display_text_we_o,
+    output logic [11:0] display_text_word_addr_o,
+    output logic [31:0] display_text_wdata_o,
+    output logic [3:0] display_text_wstrb_o,
+    output logic display_font_we_o,
+    output logic [8:0] display_font_word_addr_o,
+    output logic [31:0] display_font_wdata_o,
+    output logic [3:0] display_font_wstrb_o,
 
     input  logic        host_valid,
     input  logic        host_we,
@@ -86,6 +100,7 @@ module zx32_soc #(
     localparam logic [31:0] CTRL_BASE = 32'h1003_0000;
     localparam logic [31:0] IRQ_BASE  = 32'h1004_0000;
     localparam logic [31:0] GPU_BASE  = 32'h1007_0000;
+    localparam logic [31:0] DISPLAY_BASE = 32'h1008_0000;
     localparam logic [31:0] SCRATCH_BASE = 32'h2000_0000;
     localparam logic [31:0] DDR_BASE     = 32'h8000_0000;
     localparam int          ICACHE_LINES = 128;
@@ -192,6 +207,29 @@ module zx32_soc #(
     logic        gpu_ddr_inflight;
     logic [31:0] gpu_ddr_addr_q;
     logic [31:0] gpu_ddr_wdata_q;
+    logic        display_valid;
+    logic        display_ready;
+    logic [31:0] display_rdata;
+    logic [31:0] display_addr;
+    logic        display_enable;
+    logic        display_soft_reset;
+    logic        display_test_pattern_enable;
+    logic [31:0] display_fb_addr;
+    logic [31:0] display_fb_stride;
+    logic [15:0] display_fb_width;
+    logic [15:0] display_fb_height;
+    logic [1:0]  display_mode;
+    logic [31:0] display_bg_color;
+    logic        display_text_enable;
+    logic        display_text_clear;
+    logic        display_text_we;
+    logic [11:0] display_text_word_addr;
+    logic [31:0] display_text_wdata;
+    logic [3:0]  display_text_wstrb;
+    logic        display_font_we;
+    logic [8:0]  display_font_word_addr;
+    logic [31:0] display_font_wdata;
+    logic [3:0]  display_font_wstrb;
     logic        dm_valid;
     logic        dm_ready;
     logic [31:0] dm_rdata;
@@ -301,12 +339,14 @@ module zx32_soc #(
     assign bus_wdata = host_valid ? host_wdata : dmem_wdata;
 
     assign ram_dmem_valid = bus_valid && bus_addr[31:16] == 16'h0000;
-    assign uart_valid = bus_valid && bus_addr[31:12] == UART_BASE[31:12];
-    assign timer_valid = bus_valid && bus_addr[31:12] == TIMER_BASE[31:12];
-    assign dm_valid = bus_valid && bus_addr[31:12] == DM_BASE[31:12];
-    assign ctrl_valid = bus_valid && bus_addr[31:12] == CTRL_BASE[31:12];
-    assign irq_valid = bus_valid && bus_addr[31:12] == IRQ_BASE[31:12];
-    assign gpu_valid = bus_valid && bus_addr[31:12] == GPU_BASE[31:12];
+    assign uart_valid = bus_valid && bus_addr[31:16] == UART_BASE[31:16];
+    assign timer_valid = bus_valid && bus_addr[31:16] == TIMER_BASE[31:16];
+    assign dm_valid = bus_valid && bus_addr[31:16] == DM_BASE[31:16];
+    assign ctrl_valid = bus_valid && bus_addr[31:16] == CTRL_BASE[31:16];
+    assign irq_valid = bus_valid && bus_addr[31:16] == IRQ_BASE[31:16];
+    assign gpu_valid = bus_valid && bus_addr[31:16] == GPU_BASE[31:16];
+    assign display_valid = bus_valid && bus_addr[31:16] == DISPLAY_BASE[31:16];
+    assign display_addr = bus_addr - DISPLAY_BASE;
     assign scratch_valid = bus_valid && bus_addr[31:20] == SCRATCH_BASE[31:20];
     assign bus_ddr_raw_selected = bus_valid && bus_addr[31:30] == 2'b10;
     assign dmem_ddr_raw_selected = !host_valid && bus_ddr_raw_selected;
@@ -395,6 +435,20 @@ module zx32_soc #(
     assign host_ready = host_valid && bus_ready;
     assign host_rdata = bus_rdata;
     assign ctrl_ready = ctrl_valid;
+    assign display_enable_o = display_enable;
+    assign display_test_pattern_enable_o = display_test_pattern_enable;
+    assign display_text_enable_o = display_text_enable;
+    assign display_text_clear_o = display_text_clear;
+    assign display_mode_o = display_mode;
+    assign display_bg_color_o = display_bg_color;
+    assign display_text_we_o = display_text_we;
+    assign display_text_word_addr_o = display_text_word_addr;
+    assign display_text_wdata_o = display_text_wdata;
+    assign display_text_wstrb_o = display_text_wstrb;
+    assign display_font_we_o = display_font_we;
+    assign display_font_word_addr_o = display_font_word_addr;
+    assign display_font_wdata_o = display_font_wdata;
+    assign display_font_wstrb_o = display_font_wstrb;
     assign dbg_bus_state = {20'd0,
                             ddr_req_valid,
                             ddr_req_we,
@@ -706,6 +760,9 @@ module zx32_soc #(
         end else if (gpu_valid) begin
             bus_ready = gpu_ready;
             bus_rdata = gpu_rdata;
+        end else if (display_valid) begin
+            bus_ready = display_ready;
+            bus_rdata = display_rdata;
         end else if (dm_valid) begin
             bus_ready = dm_ready;
             bus_rdata = dm_rdata;
@@ -830,6 +887,42 @@ module zx32_soc #(
         .ddr_addr(gpu_ddr_addr),
         .ddr_wdata(gpu_ddr_wdata),
         .ddr_ready(gpu_ddr_ready)
+    );
+
+    mmio_display_ctrl u_display_ctrl (
+        .clk(clk),
+        .rst_n(rst_n),
+        .valid(display_valid),
+        .we(bus_we),
+        .wstrb(bus_wstrb),
+        .addr(display_addr),
+        .wdata(bus_wdata),
+        .ready(display_ready),
+        .rdata(display_rdata),
+        .hpd(1'b0),
+        .mode_locked(1'b0),
+        .frame_done_i(1'b0),
+        .scan_x(16'd0),
+        .scan_y(16'd0),
+        .display_enable(display_enable),
+        .soft_reset(display_soft_reset),
+        .test_pattern_enable(display_test_pattern_enable),
+        .fb_addr(display_fb_addr),
+        .fb_stride(display_fb_stride),
+        .fb_width(display_fb_width),
+        .fb_height(display_fb_height),
+        .mode(display_mode),
+        .bg_color(display_bg_color),
+        .text_enable(display_text_enable),
+        .text_clear(display_text_clear),
+        .text_we(display_text_we),
+        .text_word_addr(display_text_word_addr),
+        .text_wdata(display_text_wdata),
+        .text_wstrb(display_text_wstrb),
+        .font_we(display_font_we),
+        .font_word_addr(display_font_word_addr),
+        .font_wdata(display_font_wdata),
+        .font_wstrb(display_font_wstrb)
     );
 
     datamover_ctrl u_datamover_ctrl (
