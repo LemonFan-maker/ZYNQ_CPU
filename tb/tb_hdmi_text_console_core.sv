@@ -13,6 +13,10 @@ module tb_hdmi_text_console_core;
     logic [11:0] text_word_addr;
     logic [31:0] text_wdata;
     logic [3:0] text_wstrb;
+    logic attr_we;
+    logic [10:0] attr_word_addr;
+    logic [31:0] attr_wdata;
+    logic [3:0] attr_wstrb;
     logic font_we;
     logic [8:0] font_word_addr;
     logic [31:0] font_wdata;
@@ -45,6 +49,10 @@ module tb_hdmi_text_console_core;
         .text_word_addr(text_word_addr),
         .text_wdata(text_wdata),
         .text_wstrb(text_wstrb),
+        .attr_we(attr_we),
+        .attr_word_addr(attr_word_addr),
+        .attr_wdata(attr_wdata),
+        .attr_wstrb(attr_wstrb),
         .font_we(font_we),
         .font_word_addr(font_word_addr),
         .font_wdata(font_wdata),
@@ -70,6 +78,10 @@ module tb_hdmi_text_console_core;
         text_word_addr = 12'd0;
         text_wdata = 32'd0;
         text_wstrb = 4'd0;
+        attr_we = 1'b0;
+        attr_word_addr = 11'd0;
+        attr_wdata = 32'd0;
+        attr_wstrb = 4'd0;
         font_we = 1'b0;
         font_word_addr = 9'd0;
         font_wdata = 32'd0;
@@ -93,7 +105,7 @@ module tb_hdmi_text_console_core;
         font_wstrb = 4'd0;
 
         repeat (4) @(posedge sys_clk);
-        if (u_core.font_mem[180] !== 32'h5a5a_a55a) begin
+        if (u_core.u_font_ram.mem[180] !== 32'h5a5a_a55a) begin
             $fatal(1, "font write was lost while text clear was active");
         end
 
@@ -103,6 +115,10 @@ module tb_hdmi_text_console_core;
         text_word_addr = 10'd0;
         text_wdata = 32'h2020_2041;
         text_wstrb = 4'hf;
+        attr_we = 1'b1;
+        attr_word_addr = 11'd0;
+        attr_wdata = 32'h7777_7779;
+        attr_wstrb = 4'hf;
         font_we = 1'b1;
         font_word_addr = 9'd260;
         font_wdata = 32'hffff_ffff;
@@ -110,14 +126,19 @@ module tb_hdmi_text_console_core;
         @(negedge sys_clk);
         text_we = 1'b0;
         text_wstrb = 4'd0;
+        attr_we = 1'b0;
+        attr_wstrb = 4'd0;
         font_we = 1'b0;
         font_wstrb = 4'd0;
 
         repeat (2) @(posedge sys_clk);
-        if (u_core.text_mem[0] !== 32'h2020_2041) begin
+        if (u_core.u_text_ram.mem[0] !== 32'h2020_2041) begin
             $fatal(1, "text write did not update text memory");
         end
-        if (u_core.font_mem[260] !== 32'hffff_ffff) begin
+        if (u_core.u_attr_ram.mem[0] !== 32'h7777_7779) begin
+            $fatal(1, "attr write did not update attr memory");
+        end
+        if (u_core.u_font_ram.mem[260] !== 32'hffff_ffff) begin
             $fatal(1, "glyph write did not update font memory");
         end
 

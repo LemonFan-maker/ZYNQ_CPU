@@ -23,6 +23,10 @@ module tb_mmio_display_ctrl;
     logic [11:0] text_word_addr;
     logic [31:0] text_wdata;
     logic [3:0] text_wstrb;
+    logic attr_we;
+    logic [10:0] attr_word_addr;
+    logic [31:0] attr_wdata;
+    logic [3:0] attr_wstrb;
     logic font_we;
     logic [8:0] font_word_addr;
     logic [31:0] font_wdata;
@@ -61,6 +65,10 @@ module tb_mmio_display_ctrl;
         .text_word_addr(text_word_addr),
         .text_wdata(text_wdata),
         .text_wstrb(text_wstrb),
+        .attr_we(attr_we),
+        .attr_word_addr(attr_word_addr),
+        .attr_wdata(attr_wdata),
+        .attr_wstrb(attr_wstrb),
         .font_we(font_we),
         .font_word_addr(font_word_addr),
         .font_wdata(font_wdata),
@@ -161,7 +169,24 @@ module tb_mmio_display_ctrl;
         valid = 1'b1;
         we = 1'b1;
         wstrb = 4'hf;
-        addr = 32'h0000_5000;
+        addr = 32'h0000_4400;
+        wdata = 32'h7777_7779;
+        #1;
+        if (attr_we !== 1'b1 || attr_word_addr !== 11'd0 || attr_wdata !== 32'h7777_7779 || attr_wstrb !== 4'hf) begin
+            $fatal(1, "attr window write mismatch at base");
+        end
+        @(negedge clk);
+        valid = 1'b0;
+        we = 1'b0;
+        wstrb = 4'd0;
+        addr = 32'd0;
+        wdata = 32'd0;
+
+        @(negedge clk);
+        valid = 1'b1;
+        we = 1'b1;
+        wstrb = 4'hf;
+        addr = 32'h0000_6400;
         wdata = 32'h0302_0100;
         #1;
         if (font_we !== 1'b1 || font_word_addr !== 9'd0 || font_wdata !== 32'h0302_0100 || font_wstrb !== 4'hf) begin
@@ -178,7 +203,7 @@ module tb_mmio_display_ctrl;
         valid = 1'b1;
         we = 1'b1;
         wstrb = 4'hf;
-        addr = 32'h0000_5024;
+        addr = 32'h0000_6424;
         wdata = 32'h0000_0002;
         #1;
         if (font_we !== 1'b1 || font_word_addr !== 9'd9 || text_clear !== 1'b0 || soft_reset !== 1'b0) begin

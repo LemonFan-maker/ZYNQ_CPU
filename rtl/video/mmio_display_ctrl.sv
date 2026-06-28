@@ -32,6 +32,10 @@ module mmio_display_ctrl (
     output logic [11:0] text_word_addr,
     output logic [31:0] text_wdata,
     output logic [3:0]  text_wstrb,
+    output logic        attr_we,
+    output logic [10:0] attr_word_addr,
+    output logic [31:0] attr_wdata,
+    output logic [3:0]  attr_wstrb,
     output logic        font_we,
     output logic [8:0]  font_word_addr,
     output logic [31:0] font_wdata,
@@ -39,28 +43,38 @@ module mmio_display_ctrl (
 );
     localparam logic [31:0] TEXT_BASE = 32'h0000_0400;
     localparam logic [31:0] TEXT_BYTES = 32'd16080;
-    localparam logic [31:0] FONT_BASE = 32'h0000_5000;
+    localparam logic [31:0] ATTR_BASE = 32'h0000_4400;
+    localparam logic [31:0] ATTR_BYTES = 32'd8040;
+    localparam logic [31:0] FONT_BASE = 32'h0000_6400;
     localparam logic [31:0] FONT_BYTES = 32'd2048;
 
     logic underflow_q;
     logic frame_done_q;
     logic [31:0] underflow_count_q;
     logic text_window;
+    logic attr_window;
     logic font_window;
     logic [31:0] text_offset;
+    logic [31:0] attr_offset;
     logic [31:0] font_offset;
 
     assign ready = valid;
     assign text_window = addr >= TEXT_BASE && addr < TEXT_BASE + TEXT_BYTES;
+    assign attr_window = addr >= ATTR_BASE && addr < ATTR_BASE + ATTR_BYTES;
     assign font_window = addr >= FONT_BASE && addr < FONT_BASE + FONT_BYTES;
     assign text_offset = addr - TEXT_BASE;
+    assign attr_offset = addr - ATTR_BASE;
     assign font_offset = addr - FONT_BASE;
-    assign soft_reset = valid && we && !text_window && !font_window && addr[7:2] == 6'h00 && wstrb[0] && wdata[1];
-    assign text_clear = valid && we && !text_window && !font_window && addr[7:2] == 6'h09 && wstrb[0] && wdata[1];
+    assign soft_reset = valid && we && !text_window && !attr_window && !font_window && addr[7:2] == 6'h00 && wstrb[0] && wdata[1];
+    assign text_clear = valid && we && !text_window && !attr_window && !font_window && addr[7:2] == 6'h09 && wstrb[0] && wdata[1];
     assign text_we = valid && we && text_window;
     assign text_word_addr = text_offset[13:2];
     assign text_wdata = wdata;
     assign text_wstrb = wstrb;
+    assign attr_we = valid && we && attr_window;
+    assign attr_word_addr = attr_offset[12:2];
+    assign attr_wdata = wdata;
+    assign attr_wstrb = wstrb;
     assign font_we = valid && we && font_window;
     assign font_word_addr = font_offset[10:2];
     assign font_wdata = wdata;
@@ -68,7 +82,7 @@ module mmio_display_ctrl (
 
     always_comb begin
         rdata = 32'd0;
-        if (!text_window && !font_window) begin
+        if (!text_window && !attr_window && !font_window) begin
             unique case (addr[7:2])
                 6'h00: rdata = {29'd0, test_pattern_enable, 1'b0, display_enable};
                 6'h01: rdata = {27'd0, frame_done_q, underflow_q, hpd, mode_locked, display_enable};
@@ -104,7 +118,7 @@ module mmio_display_ctrl (
                 frame_done_q <= 1'b1;
             end
 
-            if (valid && we && !text_window && !font_window) begin
+            if (valid && we && !text_window && !attr_window && !font_window) begin
                 unique case (addr[7:2])
                     6'h00: begin
                         if (wstrb[0]) begin

@@ -11,6 +11,10 @@ module hdmi_test_pattern_top_xilinx (
     input  wire [11:0] text_word_addr,
     input  wire [31:0] text_wdata,
     input  wire [3:0] text_wstrb,
+    input  wire attr_we,
+    input  wire [10:0] attr_word_addr,
+    input  wire [31:0] attr_wdata,
+    input  wire [3:0] attr_wstrb,
     input  wire font_we,
     input  wire [8:0] font_word_addr,
     input  wire [31:0] font_wdata,
@@ -27,11 +31,11 @@ module hdmi_test_pattern_top_xilinx (
 );
     wire clk_fb;
     wire clk_fb_buf;
-    wire pix_clk_raw;
     wire pix_5x_raw;
     wire pix_clk;
     wire pix_5x_clk;
     wire mmcm_locked;
+    wire mmcm_unlocked;
     wire [9:0] tmds_red;
     wire [9:0] tmds_green;
     wire [9:0] tmds_blue;
@@ -41,8 +45,11 @@ module hdmi_test_pattern_top_xilinx (
     wire frame_done;
     wire rst_video_n;
     wire tmds_clk_se;
+    reg [2:0] rst_video_sync;
+    reg [2:0] rst_serdes_sync;
 
-    assign rst_video_n = rst_n && mmcm_locked;
+    assign mmcm_unlocked = !mmcm_locked;
+    assign rst_video_n = rst_video_sync[2];
     assign video_mode = 2'd2;
 
     MMCME2_BASE #(
@@ -51,10 +58,10 @@ module hdmi_test_pattern_top_xilinx (
         .DIVCLK_DIVIDE(5),
         .CLKFBOUT_MULT_F(49.500),
         .CLKFBOUT_PHASE(0.000),
-        .CLKOUT0_DIVIDE_F(5.000),
+        .CLKOUT0_DIVIDE_F(10.000),
         .CLKOUT0_PHASE(0.000),
         .CLKOUT0_DUTY_CYCLE(0.500),
-        .CLKOUT1_DIVIDE(1),
+        .CLKOUT1_DIVIDE(2),
         .CLKOUT1_PHASE(0.000),
         .CLKOUT1_DUTY_CYCLE(0.500)
     ) u_mmcm (
@@ -64,7 +71,7 @@ module hdmi_test_pattern_top_xilinx (
         .PWRDWN(1'b0),
         .CLKFBOUT(clk_fb),
         .CLKFBOUTB(),
-        .CLKOUT0(pix_clk_raw),
+        .CLKOUT0(),
         .CLKOUT0B(),
         .CLKOUT1(pix_5x_raw),
         .CLKOUT1B(),
@@ -79,8 +86,37 @@ module hdmi_test_pattern_top_xilinx (
     );
 
     BUFG u_fb_buf (.I(clk_fb), .O(clk_fb_buf));
-    BUFG u_pix_buf (.I(pix_clk_raw), .O(pix_clk));
     BUFIO u_pix_5x_buf (.I(pix_5x_raw), .O(pix_5x_clk));
+    BUFR #(
+        .BUFR_DIVIDE("5"),
+        .SIM_DEVICE("7SERIES")
+    ) u_pix_div_buf (
+        .I(pix_5x_raw),
+        .CE(1'b1),
+        .CLR(mmcm_unlocked),
+        .O(pix_clk)
+    );
+
+    initial begin
+        rst_video_sync = 3'b000;
+        rst_serdes_sync = 3'b111;
+    end
+
+    always @(posedge pix_clk) begin
+        if (!rst_n || !mmcm_locked) begin
+            rst_video_sync <= 3'b000;
+        end else begin
+            rst_video_sync <= {rst_video_sync[1:0], 1'b1};
+        end
+    end
+
+    always @(posedge pix_clk) begin
+        if (!rst_video_n) begin
+            rst_serdes_sync <= 3'b111;
+        end else begin
+            rst_serdes_sync <= {rst_serdes_sync[1:0], 1'b0};
+        end
+    end
 
     hdmi_text_console_core u_core (
         .sys_clk(clk_75mhz),
@@ -97,6 +133,10 @@ module hdmi_test_pattern_top_xilinx (
         .text_word_addr(text_word_addr),
         .text_wdata(text_wdata),
         .text_wstrb(text_wstrb),
+        .attr_we(attr_we),
+        .attr_word_addr(attr_word_addr),
+        .attr_wdata(attr_wdata),
+        .attr_wstrb(attr_wstrb),
         .font_we(font_we),
         .font_word_addr(font_word_addr),
         .font_wdata(font_wdata),
@@ -112,7 +152,7 @@ module hdmi_test_pattern_top_xilinx (
     hdmi_tmds_oserdes_xilinx u_ser_red (
         .pix_clk(pix_clk),
         .pix_5x_clk(pix_5x_clk),
-        .rst(!rst_video_n),
+        .rst(rst_serdes_sync[2]),
         .data(tmds_red),
         .out_p(HDMI_D2_P),
         .out_n(HDMI_D2_N)
@@ -121,7 +161,7 @@ module hdmi_test_pattern_top_xilinx (
     hdmi_tmds_oserdes_xilinx u_ser_green (
         .pix_clk(pix_clk),
         .pix_5x_clk(pix_5x_clk),
-        .rst(!rst_video_n),
+        .rst(rst_serdes_sync[2]),
         .data(tmds_green),
         .out_p(HDMI_D1_P),
         .out_n(HDMI_D1_N)
@@ -130,7 +170,7 @@ module hdmi_test_pattern_top_xilinx (
     hdmi_tmds_oserdes_xilinx u_ser_blue (
         .pix_clk(pix_clk),
         .pix_5x_clk(pix_5x_clk),
-        .rst(!rst_video_n),
+        .rst(rst_serdes_sync[2]),
         .data(tmds_blue),
         .out_p(HDMI_D0_P),
         .out_n(HDMI_D0_N)
@@ -143,7 +183,7 @@ module hdmi_test_pattern_top_xilinx (
         .CE(1'b1),
         .D1(1'b1),
         .D2(1'b0),
-        .R(!rst_video_n),
+        .R(rst_serdes_sync[2]),
         .S(1'b0),
         .Q(tmds_clk_se)
     );

@@ -86,17 +86,30 @@ module mmio_gpu_fill (
     logic        invalid_line_start;
     logic [31:0] start_addr_base;
     logic        start_req;
+    logic        start_accept_req;
     logic        submit_req;
     logic        soft_reset_req;
     logic        invalid_start;
     logic        invalid_submit;
     logic        launch_req;
+    logic        capture_start_req;
+    logic        capture_fifo_req;
     logic [3:0]  launch_op;
     logic [31:0] launch_color;
     logic [15:0] launch_x;
     logic [15:0] launch_y;
     logic [15:0] launch_w;
     logic [15:0] launch_h;
+    logic        launch_pending_q;
+    logic        launch_from_fifo_q;
+    logic        start_wait_q;
+    logic [3:0]  launch_op_q;
+    logic [31:0] launch_color_q;
+    logic [15:0] launch_x_q;
+    logic [15:0] launch_y_q;
+    logic [15:0] launch_w_q;
+    logic [15:0] launch_h_q;
+    logic [31:0] launch_ctrl_q;
     logic        launch_is_clear;
     logic        launch_is_fill_rect;
     logic        launch_is_draw_line;
@@ -115,11 +128,12 @@ module mmio_gpu_fill (
     logic [31:0] launch_start_addr_base;
     logic        engine_busy;
 
-    assign ready = valid;
+    assign ready = valid && !(capture_start_req && !start_wait_q);
     assign start_req = valid && we && addr[7:2] == 6'h00 && wstrb[0] && wdata[0];
+    assign start_accept_req = start_req && !start_wait_q;
     assign submit_req = valid && we && addr[7:2] == 6'h0d && wstrb[0] && wdata[0];
     assign soft_reset_req = valid && we && addr[7:2] == 6'h00 && wstrb[3] && wdata[31];
-    assign engine_busy = busy_q || fifo_count_q != 3'd0;
+    assign engine_busy = busy_q || launch_pending_q || fifo_count_q != 3'd0;
 
     assign op_is_clear = wdata[7:4] == OP_CLEAR;
     assign op_is_fill_rect = wdata[7:4] == OP_FILL_RECT;
@@ -136,7 +150,7 @@ module mmio_gpu_fill (
     assign invalid_rect_start = draw_w == 16'd0 || draw_h == 16'd0;
     assign invalid_line_start = rect_x_q >= fb_width_q || rect_y_q >= fb_height_q ||
                                 rect_w_q >= fb_width_q || rect_h_q >= fb_height_q;
-    assign invalid_start = busy_q ||
+    assign invalid_start = engine_busy ||
                            unsupported_op ||
                            fb_addr_q[31:30] != 2'b10 ||
                            fb_stride_q == 32'd0 ||
@@ -147,13 +161,16 @@ module mmio_gpu_fill (
                             fb_stride_q == 32'd0 ||
                             (op_is_draw_line ? invalid_line_start : invalid_rect_start);
 
-    assign launch_req = start_req || (!busy_q && fifo_count_q != 3'd0 && !submit_req);
-    assign launch_op = start_req ? wdata[7:4] : fifo_op_q[fifo_rd_q[1:0]];
-    assign launch_color = start_req ? color_q : fifo_color_q[fifo_rd_q[1:0]];
-    assign launch_x = start_req ? rect_x_q : fifo_x_q[fifo_rd_q[1:0]];
-    assign launch_y = start_req ? rect_y_q : fifo_y_q[fifo_rd_q[1:0]];
-    assign launch_w = start_req ? rect_w_q : fifo_w_q[fifo_rd_q[1:0]];
-    assign launch_h = start_req ? rect_h_q : fifo_h_q[fifo_rd_q[1:0]];
+    assign capture_start_req = start_accept_req && !invalid_start;
+    assign capture_fifo_req = !start_req && !busy_q && !launch_pending_q &&
+                              fifo_count_q != 3'd0 && !submit_req;
+    assign launch_req = launch_pending_q;
+    assign launch_op = launch_op_q;
+    assign launch_color = launch_color_q;
+    assign launch_x = launch_x_q;
+    assign launch_y = launch_y_q;
+    assign launch_w = launch_w_q;
+    assign launch_h = launch_h_q;
     assign launch_is_clear = launch_op == OP_CLEAR;
     assign launch_is_fill_rect = launch_op == OP_FILL_RECT;
     assign launch_is_draw_line = launch_op == OP_DRAW_LINE;
@@ -169,8 +186,7 @@ module mmio_gpu_fill (
     assign launch_invalid_rect = launch_draw_w == 16'd0 || launch_draw_h == 16'd0;
     assign launch_invalid_line = launch_x >= fb_width_q || launch_y >= fb_height_q ||
                                  launch_w >= fb_width_q || launch_h >= fb_height_q;
-    assign launch_invalid = (start_req && engine_busy) ||
-                            launch_unsupported ||
+    assign launch_invalid = launch_unsupported ||
                             fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (launch_is_draw_line ? launch_invalid_line : launch_invalid_rect);
@@ -244,6 +260,16 @@ module mmio_gpu_fill (
             line_sx_inc_q <= 1'b1;
             line_sy_inc_q <= 1'b1;
             line_err_q <= 20'sd0;
+            launch_pending_q <= 1'b0;
+            launch_from_fifo_q <= 1'b0;
+            start_wait_q <= 1'b0;
+            launch_op_q <= 4'd0;
+            launch_color_q <= 32'd0;
+            launch_x_q <= 16'd0;
+            launch_y_q <= 16'd0;
+            launch_w_q <= 16'd0;
+            launch_h_q <= 16'd0;
+            launch_ctrl_q <= 32'd0;
             fifo_wr_q <= 3'd0;
             fifo_rd_q <= 3'd0;
             fifo_count_q <= 3'd0;
@@ -277,6 +303,16 @@ module mmio_gpu_fill (
             line_sx_inc_q <= 1'b1;
             line_sy_inc_q <= 1'b1;
             line_err_q <= 20'sd0;
+            launch_pending_q <= 1'b0;
+            launch_from_fifo_q <= 1'b0;
+            start_wait_q <= 1'b0;
+            launch_op_q <= 4'd0;
+            launch_color_q <= 32'd0;
+            launch_x_q <= 16'd0;
+            launch_y_q <= 16'd0;
+            launch_w_q <= 16'd0;
+            launch_h_q <= 16'd0;
+            launch_ctrl_q <= 32'd0;
             fifo_wr_q <= 3'd0;
             fifo_rd_q <= 3'd0;
             fifo_count_q <= 3'd0;
@@ -314,6 +350,12 @@ module mmio_gpu_fill (
                 endcase
             end
 
+            if (start_accept_req) begin
+                last_ctrl_q <= wdata;
+                done_q <= 1'b0;
+                error_q <= invalid_start;
+            end
+
             if (submit_req) begin
                 last_ctrl_q <= wdata;
                 done_q <= 1'b0;
@@ -330,16 +372,42 @@ module mmio_gpu_fill (
                 end
             end
 
+            if (capture_start_req) begin
+                launch_pending_q <= 1'b1;
+                launch_from_fifo_q <= 1'b0;
+                start_wait_q <= 1'b1;
+                launch_op_q <= wdata[7:4];
+                launch_color_q <= color_q;
+                launch_x_q <= rect_x_q;
+                launch_y_q <= rect_y_q;
+                launch_w_q <= rect_w_q;
+                launch_h_q <= rect_h_q;
+                launch_ctrl_q <= wdata;
+            end else if (capture_fifo_req) begin
+                launch_pending_q <= 1'b1;
+                launch_from_fifo_q <= 1'b1;
+                launch_op_q <= fifo_op_q[fifo_rd_q[1:0]];
+                launch_color_q <= fifo_color_q[fifo_rd_q[1:0]];
+                launch_x_q <= fifo_x_q[fifo_rd_q[1:0]];
+                launch_y_q <= fifo_y_q[fifo_rd_q[1:0]];
+                launch_w_q <= fifo_w_q[fifo_rd_q[1:0]];
+                launch_h_q <= fifo_h_q[fifo_rd_q[1:0]];
+                launch_ctrl_q <= {24'd0, fifo_op_q[fifo_rd_q[1:0]], 3'd0, 1'b1};
+                fifo_rd_q <= fifo_rd_q == 3'd3 ? 3'd0 : (fifo_rd_q + 3'd1);
+                fifo_count_q <= fifo_count_q - 3'd1;
+            end
+
             if (launch_req) begin
-                last_ctrl_q <= wdata;
+                launch_pending_q <= 1'b0;
+                launch_from_fifo_q <= 1'b0;
+                start_wait_q <= 1'b0;
+                last_ctrl_q <= launch_ctrl_q;
                 done_q <= 1'b0;
                 error_q <= launch_invalid;
                 ddr_wait_q <= 24'd0;
                 pixel_count_q <= 32'd0;
                 if (!launch_invalid) begin
-                    if (!start_req) begin
-                        fifo_rd_q <= fifo_rd_q == 3'd3 ? 3'd0 : (fifo_rd_q + 3'd1);
-                        fifo_count_q <= fifo_count_q - 3'd1;
+                    if (launch_from_fifo_q) begin
                         last_ctrl_q <= {24'd0, launch_op, 3'd0, 1'b1};
                     end
                     op_q <= launch_op;
@@ -373,7 +441,7 @@ module mmio_gpu_fill (
                 if (op_q == OP_DRAW_LINE) begin
                     if (cur_x_q == end_x_q && cur_y_q == end_y_q) begin
                         busy_q <= 1'b0;
-                        done_q <= 1'b1;
+                        done_q <= fifo_count_q == 3'd0;
                         cmd_done_count_q <= cmd_done_count_q + 32'd1;
                     end else begin
                         if (line_move_x) begin
@@ -391,7 +459,7 @@ module mmio_gpu_fill (
                     cur_x_q <= draw_start_x_q;
                     if ((cur_y_q + 16'd1) >= end_y_q) begin
                         busy_q <= 1'b0;
-                        done_q <= 1'b1;
+                        done_q <= fifo_count_q == 3'd0;
                         cmd_done_count_q <= cmd_done_count_q + 32'd1;
                     end else begin
                         cur_y_q <= cur_y_q + 16'd1;

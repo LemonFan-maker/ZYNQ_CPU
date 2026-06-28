@@ -17,6 +17,10 @@ module zx32_soc #(
     output logic [11:0] display_text_word_addr_o,
     output logic [31:0] display_text_wdata_o,
     output logic [3:0] display_text_wstrb_o,
+    output logic display_attr_we_o,
+    output logic [10:0] display_attr_word_addr_o,
+    output logic [31:0] display_attr_wdata_o,
+    output logic [3:0] display_attr_wstrb_o,
     output logic display_font_we_o,
     output logic [8:0] display_font_word_addr_o,
     output logic [31:0] display_font_wdata_o,
@@ -226,6 +230,10 @@ module zx32_soc #(
     logic [11:0] display_text_word_addr;
     logic [31:0] display_text_wdata;
     logic [3:0]  display_text_wstrb;
+    logic        display_attr_we;
+    logic [10:0] display_attr_word_addr;
+    logic [31:0] display_attr_wdata;
+    logic [3:0]  display_attr_wstrb;
     logic        display_font_we;
     logic [8:0]  display_font_word_addr;
     logic [31:0] display_font_wdata;
@@ -235,7 +243,10 @@ module zx32_soc #(
     logic [31:0] dm_rdata;
     logic        ctrl_valid;
     logic        ctrl_ready;
-    logic [31:0] ctrl_rdata;
+    logic        ctrl_valid_q;
+    logic        ctrl_accept;
+    logic [31:0] ctrl_rdata_comb;
+    logic [31:0] ctrl_rdata_q;
     logic        scratch_valid;
     logic        scratch_ready;
     logic [31:0] scratch_rdata;
@@ -434,7 +445,8 @@ module zx32_soc #(
     assign dmem_rdata = bus_rdata;
     assign host_ready = host_valid && bus_ready;
     assign host_rdata = bus_rdata;
-    assign ctrl_ready = ctrl_valid;
+    assign ctrl_accept = ctrl_valid && !ctrl_valid_q;
+    assign ctrl_ready = ctrl_valid_q;
     assign display_enable_o = display_enable;
     assign display_test_pattern_enable_o = display_test_pattern_enable;
     assign display_text_enable_o = display_text_enable;
@@ -445,6 +457,10 @@ module zx32_soc #(
     assign display_text_word_addr_o = display_text_word_addr;
     assign display_text_wdata_o = display_text_wdata;
     assign display_text_wstrb_o = display_text_wstrb;
+    assign display_attr_we_o = display_attr_we;
+    assign display_attr_word_addr_o = display_attr_word_addr;
+    assign display_attr_wdata_o = display_attr_wdata;
+    assign display_attr_wstrb_o = display_attr_wstrb;
     assign display_font_we_o = display_font_we;
     assign display_font_word_addr_o = display_font_word_addr;
     assign display_font_wdata_o = display_font_wdata;
@@ -464,62 +480,62 @@ module zx32_soc #(
                             imem_ready};
 
     always_comb begin
-        ctrl_rdata = 32'd0;
+        ctrl_rdata_comb = 32'd0;
         case (bus_addr[7:2])
-            6'h00: ctrl_rdata = {31'd0, cpu_reset_req};
-            6'h01: ctrl_rdata = {31'd0, cpu_reset_req};
-            6'h02: ctrl_rdata = BRAM_WORDS;
-            6'h03: ctrl_rdata = SCRATCH_WORDS;
-            6'h04: ctrl_rdata = cpu_reset_vector;
-            6'h08: ctrl_rdata = dbg_core_state;
-            6'h09: ctrl_rdata = dbg_pc;
-            6'h0a: ctrl_rdata = dbg_satp;
-            6'h0b: ctrl_rdata = dbg_stvec;
-            6'h0c: ctrl_rdata = dbg_sepc;
-            6'h0d: ctrl_rdata = dbg_scause;
-            6'h0e: ctrl_rdata = dbg_stval;
-            6'h0f: ctrl_rdata = dbg_req_vaddr;
-            6'h10: ctrl_rdata = dbg_req_paddr;
-            6'h11: ctrl_rdata = dbg_ptw_pte_addr;
-            6'h12: ctrl_rdata = dbg_ptw_l1_pte;
-            6'h13: ctrl_rdata = dbg_ptw_l0_pte;
-            6'h14: ctrl_rdata = dbg_bus_state;
-            6'h15: ctrl_rdata = ddr_req_addr;
-            6'h16: ctrl_rdata = imem_addr;
-            6'h17: ctrl_rdata = dmem_addr;
-            6'h18: ctrl_rdata = dbg_last_ddr_addr;
-            6'h19: ctrl_rdata = dbg_last_ddr_state;
-            6'h1a: ctrl_rdata = dbg_last_axi_araddr;
-            6'h1b: ctrl_rdata = dbg_last_imem_addr;
-            6'h1c: ctrl_rdata = dbg_last_dmem_addr;
-            6'h20: ctrl_rdata = dbg_mcycle_lo;
-            6'h21: ctrl_rdata = dbg_mcycle_hi;
-            6'h22: ctrl_rdata = dbg_minstret_lo;
-            6'h23: ctrl_rdata = dbg_minstret_hi;
-            6'h24: ctrl_rdata = dbg_wfi_cycles_lo;
-            6'h25: ctrl_rdata = dbg_wfi_cycles_hi;
-            6'h26: ctrl_rdata = dbg_fetch_wait_cycles;
-            6'h27: ctrl_rdata = dbg_dmem_wait_cycles;
-            6'h28: ctrl_rdata = perf_imem_ddr_reqs;
-            6'h29: ctrl_rdata = perf_dmem_ddr_reqs;
-            6'h2a: ctrl_rdata = perf_ddr_wait_cycles;
-            6'h2b: ctrl_rdata = perf_icache_hits;
-            6'h2c: ctrl_rdata = perf_icache_misses;
-            6'h2d: ctrl_rdata = perf_dcache_hits;
-            6'h2e: ctrl_rdata = perf_dcache_misses;
-            6'h2f: ctrl_rdata = perf_icache_wait_cycles;
-            6'h30: ctrl_rdata = perf_dcache_wait_cycles;
-            6'h31: ctrl_rdata = perf_dmem_raw_wait_cycles;
-            6'h32: ctrl_rdata = perf_host_ddr_wait_cycles;
-            6'h33: ctrl_rdata = perf_icache_refill_beats;
-            6'h34: ctrl_rdata = perf_dcache_refill_beats;
-            6'h35: ctrl_rdata = perf_dmem_raw_reads;
-            6'h36: ctrl_rdata = perf_dmem_raw_writes;
-            6'h37: ctrl_rdata = perf_host_ddr_reqs;
-            6'h38: ctrl_rdata = perf_cache_invalidates;
-            6'h39: ctrl_rdata = perf_ddr_busy_cycles;
-            6'h3a: ctrl_rdata = perf_icache_blocked_by_dbus_cycles;
-            default: ctrl_rdata = 32'd0;
+            6'h00: ctrl_rdata_comb = {31'd0, cpu_reset_req};
+            6'h01: ctrl_rdata_comb = {31'd0, cpu_reset_req};
+            6'h02: ctrl_rdata_comb = BRAM_WORDS;
+            6'h03: ctrl_rdata_comb = SCRATCH_WORDS;
+            6'h04: ctrl_rdata_comb = cpu_reset_vector;
+            6'h08: ctrl_rdata_comb = dbg_core_state;
+            6'h09: ctrl_rdata_comb = dbg_pc;
+            6'h0a: ctrl_rdata_comb = dbg_satp;
+            6'h0b: ctrl_rdata_comb = dbg_stvec;
+            6'h0c: ctrl_rdata_comb = dbg_sepc;
+            6'h0d: ctrl_rdata_comb = dbg_scause;
+            6'h0e: ctrl_rdata_comb = dbg_stval;
+            6'h0f: ctrl_rdata_comb = dbg_req_vaddr;
+            6'h10: ctrl_rdata_comb = dbg_req_paddr;
+            6'h11: ctrl_rdata_comb = dbg_ptw_pte_addr;
+            6'h12: ctrl_rdata_comb = dbg_ptw_l1_pte;
+            6'h13: ctrl_rdata_comb = dbg_ptw_l0_pte;
+            6'h14: ctrl_rdata_comb = dbg_bus_state;
+            6'h15: ctrl_rdata_comb = ddr_req_addr;
+            6'h16: ctrl_rdata_comb = imem_addr;
+            6'h17: ctrl_rdata_comb = dmem_addr;
+            6'h18: ctrl_rdata_comb = dbg_last_ddr_addr;
+            6'h19: ctrl_rdata_comb = dbg_last_ddr_state;
+            6'h1a: ctrl_rdata_comb = dbg_last_axi_araddr;
+            6'h1b: ctrl_rdata_comb = dbg_last_imem_addr;
+            6'h1c: ctrl_rdata_comb = dbg_last_dmem_addr;
+            6'h20: ctrl_rdata_comb = dbg_mcycle_lo;
+            6'h21: ctrl_rdata_comb = dbg_mcycle_hi;
+            6'h22: ctrl_rdata_comb = dbg_minstret_lo;
+            6'h23: ctrl_rdata_comb = dbg_minstret_hi;
+            6'h24: ctrl_rdata_comb = dbg_wfi_cycles_lo;
+            6'h25: ctrl_rdata_comb = dbg_wfi_cycles_hi;
+            6'h26: ctrl_rdata_comb = dbg_fetch_wait_cycles;
+            6'h27: ctrl_rdata_comb = dbg_dmem_wait_cycles;
+            6'h28: ctrl_rdata_comb = perf_imem_ddr_reqs;
+            6'h29: ctrl_rdata_comb = perf_dmem_ddr_reqs;
+            6'h2a: ctrl_rdata_comb = perf_ddr_wait_cycles;
+            6'h2b: ctrl_rdata_comb = perf_icache_hits;
+            6'h2c: ctrl_rdata_comb = perf_icache_misses;
+            6'h2d: ctrl_rdata_comb = perf_dcache_hits;
+            6'h2e: ctrl_rdata_comb = perf_dcache_misses;
+            6'h2f: ctrl_rdata_comb = perf_icache_wait_cycles;
+            6'h30: ctrl_rdata_comb = perf_dcache_wait_cycles;
+            6'h31: ctrl_rdata_comb = perf_dmem_raw_wait_cycles;
+            6'h32: ctrl_rdata_comb = perf_host_ddr_wait_cycles;
+            6'h33: ctrl_rdata_comb = perf_icache_refill_beats;
+            6'h34: ctrl_rdata_comb = perf_dcache_refill_beats;
+            6'h35: ctrl_rdata_comb = perf_dmem_raw_reads;
+            6'h36: ctrl_rdata_comb = perf_dmem_raw_writes;
+            6'h37: ctrl_rdata_comb = perf_host_ddr_reqs;
+            6'h38: ctrl_rdata_comb = perf_cache_invalidates;
+            6'h39: ctrl_rdata_comb = perf_ddr_busy_cycles;
+            6'h3a: ctrl_rdata_comb = perf_icache_blocked_by_dbus_cycles;
+            default: ctrl_rdata_comb = 32'd0;
         endcase
     end
 
@@ -527,14 +543,22 @@ module zx32_soc #(
         if (!rst_n) begin
             cpu_reset_req <= 1'b0;
             cpu_reset_vector <= 32'd0;
-        end else if (ctrl_valid && bus_we) begin
-            if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
-                cpu_reset_req <= bus_wdata[0];
+            ctrl_valid_q <= 1'b0;
+            ctrl_rdata_q <= 32'd0;
+        end else begin
+            ctrl_valid_q <= ctrl_valid;
+            if (ctrl_accept) begin
+                ctrl_rdata_q <= ctrl_rdata_comb;
             end
-            if (bus_addr[5:2] == 4'h4) begin
-                for (int i = 0; i < 4; i++) begin
-                    if (bus_wstrb[i]) begin
-                        cpu_reset_vector[i * 8 +: 8] <= bus_wdata[i * 8 +: 8];
+            if (ctrl_accept && bus_we) begin
+                if (bus_wstrb[0] && bus_addr[5:2] == 4'h0) begin
+                    cpu_reset_req <= bus_wdata[0];
+                end
+                if (bus_addr[5:2] == 4'h4) begin
+                    for (int i = 0; i < 4; i++) begin
+                        if (bus_wstrb[i]) begin
+                            cpu_reset_vector[i * 8 +: 8] <= bus_wdata[i * 8 +: 8];
+                        end
                     end
                 end
             end
@@ -768,7 +792,7 @@ module zx32_soc #(
             bus_rdata = dm_rdata;
         end else if (ctrl_valid) begin
             bus_ready = ctrl_ready;
-            bus_rdata = ctrl_rdata;
+            bus_rdata = ctrl_rdata_q;
         end else if (scratch_valid) begin
             bus_ready = scratch_ready;
             bus_rdata = scratch_rdata;
@@ -919,6 +943,10 @@ module zx32_soc #(
         .text_word_addr(display_text_word_addr),
         .text_wdata(display_text_wdata),
         .text_wstrb(display_text_wstrb),
+        .attr_we(display_attr_we),
+        .attr_word_addr(display_attr_word_addr),
+        .attr_wdata(display_attr_wdata),
+        .attr_wstrb(display_attr_wstrb),
         .font_we(display_font_we),
         .font_word_addr(display_font_word_addr),
         .font_wdata(display_font_wdata),

@@ -178,7 +178,7 @@ Goal: move from offline VRAM dumps to a real monitor-lockable HDMI signal.
 Required work:
 
 - use AX7020 HDMI OUT on PL BANK34 as the physical display path
-- validate the 640x480 test-pattern output before attaching framebuffer scanout
+- validate the timing-clean 1920x1080@30 boot-console/test-pattern output before attaching framebuffer scanout
 - keep EDID, audio, CEC, and dynamic mode selection out of the first board test
 - add HPD and HDMI output-enable pins once their exact AX7020 pins are confirmed in the board constraints
 - rerun Vivado implementation and check timing before treating the HDMI bitstream as board-ready
@@ -192,7 +192,7 @@ Required work:
 - keep the default framebuffer at `0xbc00_0000` in little-endian XRGB8888
 - add an independent burst display-DMA read master instead of reusing the current serialized GPU write path
 - add at least double line buffering between AXI/DDR and pixel clock domains
-- bring modes up in order: 640x480@60, then 1280x720@60, then 1920x1080@60
+- bring modes up in order: 640x480@60, then 1280x720@60, then 1920x1080@30, then 1920x1080@60 if the serializer path is replaced or accepted as an overclocked board-only mode
 - expose underflow count, scan position, mode status, and framebuffer address through `0x1008_0000`
 - validate 1080p60 only when `underflow_count == 0` over a sustained board run
 

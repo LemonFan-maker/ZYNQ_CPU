@@ -139,7 +139,7 @@ The initial board path targets AX7020 HDMI OUT on ZYNQ PL BANK34. The checked-in
 | `HDMI_D1_P/N` | `Y18` / `Y19` |
 | `HDMI_D2_P/N` | `Y16` / `Y17` |
 
-The current Vivado HDMI cell generates a 640x480@60-style test pattern from the PS FCLK-derived 25 MHz pixel clock. It does not yet scan VRAM. The next hardware step is to add an independent burst display-DMA read master and line buffers before attempting 720p/1080p framebuffer display.
+The current Vivado HDMI cell generates a 1920x1080 boot console/test-pattern signal from the PS FCLK-derived HDMI MMCM. The timing-clean board bring-up mode is 1920x1080@30 so the 5x TMDS serializer clock stays inside the XC7Z020-2 OSERDESE2/BUFIO period limits. It does not yet scan VRAM. The next hardware step is to add an independent burst display-DMA read master and line buffers before attempting 1080p60 framebuffer display.
 
 PL CPU display-control base address: `0x1008_0000`
 
@@ -150,7 +150,7 @@ PL CPU display-control base address: `0x1008_0000`
 | `0x08` | framebuffer address | default `0xbc00_0000` |
 | `0x0c` | framebuffer stride | bytes per row, default `1920 * 4` |
 | `0x10` | framebuffer size | `{height[15:0], width[15:0]}` |
-| `0x14` | mode | `0=640x480@60`, `1=1280x720@60`, `2=1920x1080@60` |
+| `0x14` | mode | `0=640x480 timing`, `1=1280x720 timing`, `2=1920x1080 timing`; the current fixed HDMI MMCM uses mode 2 at 30 Hz |
 | `0x18` | background color | XRGB8888-style color used by test/fallback paths |
 | `0x1c` | underflow count | future DMA underflow counter |
 | `0x20` | scan position | `{v_count[15:0], h_count[15:0]}` |

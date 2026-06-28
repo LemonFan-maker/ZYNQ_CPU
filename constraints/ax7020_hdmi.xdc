@@ -8,3 +8,7 @@ set_property PACKAGE_PIN Y16 [get_ports HDMI_D2_P]
 set_property PACKAGE_PIN Y17 [get_ports HDMI_D2_N]
 
 set_property IOSTANDARD TMDS_33 [get_ports {HDMI_CLK_P HDMI_CLK_N HDMI_D0_P HDMI_D0_N HDMI_D1_P HDMI_D1_N HDMI_D2_P HDMI_D2_N}]
+
+set_false_path -to [get_pins -hier -quiet -regexp {.*hdmi_test_0/inst/rst_video_sync_reg\[[0-9]+\]/R}]
+set_false_path -to [get_pins -hier -quiet -regexp {.*hdmi_test_0/inst/u_core/(enable_meta_reg|test_pattern_meta_reg|text_enable_meta_reg)/D}]
+set_false_path -to [get_pins -hier -quiet -regexp {.*hdmi_test_0/inst/u_core/bg_color_meta_reg\[[0-9]+\]/D}]

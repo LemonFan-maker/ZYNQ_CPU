@@ -69,6 +69,7 @@ run_video() {
     rtl/video/video_timing.sv \
     rtl/video/tmds_encoder.sv \
     rtl/video/hdmi_test_pattern.sv \
+    rtl/video/hdmi_console_ram.sv \
     rtl/video/hdmi_text_console_core.sv
 
   iverilog -g2012 \
@@ -77,6 +78,7 @@ run_video() {
     rtl/video/video_timing.sv \
     rtl/video/tmds_encoder.sv \
     rtl/video/hdmi_test_pattern.sv \
+    rtl/video/hdmi_console_ram.sv \
     rtl/video/hdmi_text_console_core.sv \
     tb/tb_hdmi_text_console_core.sv
 
@@ -96,6 +98,7 @@ run_soc() {
     rtl/periph/mmio_irqctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
+    rtl/video/hdmi_console_ram.sv \
     rtl/periph/axis_scratchpad.sv \
     rtl/bus/datamover_ctrl.sv \
     rtl/bus/axi4_master_bridge.sv \
@@ -118,6 +121,7 @@ run_soc_sv32() {
     rtl/periph/mmio_irqctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
+    rtl/video/hdmi_console_ram.sv \
     rtl/periph/axis_scratchpad.sv \
     rtl/bus/datamover_ctrl.sv \
     rtl/bus/axi4_master_bridge.sv \

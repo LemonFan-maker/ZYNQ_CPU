@@ -73,9 +73,9 @@ static const char *linux_loglevel_color(u32 level)
     case 4U:
         return "\x1b[33m";
     case 5U:
-        return "\x1b[35m";
+        return "\x1b[34m";
     case 6U:
-        return "\x1b[36m";
+        return "\x1b[32m";
     case 7U:
         return "\x1b[90m";
     default:
@@ -84,8 +84,10 @@ static const char *linux_loglevel_color(u32 level)
 }
 
 static u8 hdmi_text_shadow[ZYNQ_CPU_DISPLAY_TEXT_CELLS];
+static u8 hdmi_attr_shadow[ZYNQ_CPU_DISPLAY_TEXT_CELLS];
 static u32 hdmi_text_row;
 static u32 hdmi_text_col;
+static u8 hdmi_text_attr;
 typedef enum {
     HDMI_ESC_NONE = 0,
     HDMI_ESC_ESC,
@@ -98,6 +100,17 @@ static u32 hdmi_csi_param_count;
 static u32 hdmi_csi_value;
 static int hdmi_csi_have_value;
 
+static void hdmi_console_write_attr_word(u32 attr_word_index)
+{
+    u32 cell = attr_word_index * 8U;
+    u32 attr_word = 0U;
+
+    for (u32 i = 0U; i < 8U; i++) {
+        attr_word |= ((u32)(hdmi_attr_shadow[cell + i] & 0x0fU)) << (i * 4U);
+    }
+    Xil_Out32(ZYNQ_CPU_DISPLAY_ATTR_BASE + (attr_word_index * 4U), attr_word);
+}
+
 static void hdmi_console_write_word(u32 word_index)
 {
     u32 cell = word_index * 4U;
@@ -107,6 +120,7 @@ static void hdmi_console_write_word(u32 word_index)
         word |= ((u32)hdmi_text_shadow[cell + i]) << (i * 8U);
     }
     Xil_Out32(ZYNQ_CPU_DISPLAY_TEXT_BASE + cell, word);
+    hdmi_console_write_attr_word(cell >> 3);
 }
 
 static void hdmi_console_repaint(void)
@@ -120,9 +134,11 @@ static void hdmi_console_clear_shadow(void)
 {
     for (u32 i = 0U; i < ZYNQ_CPU_DISPLAY_TEXT_CELLS; i++) {
         hdmi_text_shadow[i] = ' ';
+        hdmi_attr_shadow[i] = 0x07U;
     }
     hdmi_text_row = 0U;
     hdmi_text_col = 0U;
+    hdmi_text_attr = 0x07U;
     hdmi_esc_state = HDMI_ESC_NONE;
 }
 
@@ -140,10 +156,13 @@ static void hdmi_console_scroll(void)
         for (u32 col = 0U; col < ZYNQ_CPU_DISPLAY_TEXT_COLS; col++) {
             hdmi_text_shadow[(row - 1U) * ZYNQ_CPU_DISPLAY_TEXT_COLS + col] =
                 hdmi_text_shadow[row * ZYNQ_CPU_DISPLAY_TEXT_COLS + col];
+            hdmi_attr_shadow[(row - 1U) * ZYNQ_CPU_DISPLAY_TEXT_COLS + col] =
+                hdmi_attr_shadow[row * ZYNQ_CPU_DISPLAY_TEXT_COLS + col];
         }
     }
     for (u32 col = 0U; col < ZYNQ_CPU_DISPLAY_TEXT_COLS; col++) {
         hdmi_text_shadow[(ZYNQ_CPU_DISPLAY_TEXT_ROWS - 1U) * ZYNQ_CPU_DISPLAY_TEXT_COLS + col] = ' ';
+        hdmi_attr_shadow[(ZYNQ_CPU_DISPLAY_TEXT_ROWS - 1U) * ZYNQ_CPU_DISPLAY_TEXT_COLS + col] = hdmi_text_attr;
     }
     hdmi_text_row = ZYNQ_CPU_DISPLAY_TEXT_ROWS - 1U;
     hdmi_text_col = 0U;
@@ -164,6 +183,7 @@ static void hdmi_console_put_cell(u32 row, u32 col, u8 ch)
     u32 cell = row * ZYNQ_CPU_DISPLAY_TEXT_COLS + col;
 
     hdmi_text_shadow[cell] = ch;
+    hdmi_attr_shadow[cell] = hdmi_text_attr;
     hdmi_console_write_word(cell >> 2);
 }
 
@@ -189,6 +209,7 @@ static void hdmi_console_clear_cell_range(u32 start_cell, u32 end_cell)
 
     for (u32 cell = start_cell; cell < end_cell; cell++) {
         hdmi_text_shadow[cell] = ' ';
+        hdmi_attr_shadow[cell] = hdmi_text_attr;
     }
 
     start_word = start_cell >> 2;
@@ -196,6 +217,105 @@ static void hdmi_console_clear_cell_range(u32 start_cell, u32 end_cell)
     for (u32 word = start_word; word <= end_word; word++) {
         hdmi_console_write_word(word);
     }
+}
+
+static void hdmi_console_rewrite_row_words(u32 row, u32 start_col, u32 end_col)
+{
+    u32 start_word;
+    u32 end_word;
+
+    if (row >= ZYNQ_CPU_DISPLAY_TEXT_ROWS || start_col >= ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        return;
+    }
+    if (end_col > ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        end_col = ZYNQ_CPU_DISPLAY_TEXT_COLS;
+    }
+    if (start_col >= end_col) {
+        return;
+    }
+
+    start_word = hdmi_console_cell(row, start_col) >> 2;
+    end_word = hdmi_console_cell(row, end_col - 1U) >> 2;
+    for (u32 word = start_word; word <= end_word; word++) {
+        hdmi_console_write_word(word);
+    }
+}
+
+static void hdmi_console_insert_cells(u32 count)
+{
+    u32 row = hdmi_text_row;
+    u32 col = hdmi_text_col;
+
+    if (row >= ZYNQ_CPU_DISPLAY_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    if (count > (ZYNQ_CPU_DISPLAY_TEXT_COLS - col)) {
+        count = ZYNQ_CPU_DISPLAY_TEXT_COLS - col;
+    }
+
+    for (u32 dst = ZYNQ_CPU_DISPLAY_TEXT_COLS - 1U; dst >= col + count; dst--) {
+        u32 dst_cell = hdmi_console_cell(row, dst);
+        u32 src_cell = hdmi_console_cell(row, dst - count);
+        hdmi_text_shadow[dst_cell] = hdmi_text_shadow[src_cell];
+        hdmi_attr_shadow[dst_cell] = hdmi_attr_shadow[src_cell];
+    }
+    for (u32 i = 0U; i < count; i++) {
+        u32 cell = hdmi_console_cell(row, col + i);
+        hdmi_text_shadow[cell] = ' ';
+        hdmi_attr_shadow[cell] = hdmi_text_attr;
+    }
+    hdmi_console_rewrite_row_words(row, col, ZYNQ_CPU_DISPLAY_TEXT_COLS);
+}
+
+static void hdmi_console_delete_cells(u32 count)
+{
+    u32 row = hdmi_text_row;
+    u32 col = hdmi_text_col;
+
+    if (row >= ZYNQ_CPU_DISPLAY_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    if (count > (ZYNQ_CPU_DISPLAY_TEXT_COLS - col)) {
+        count = ZYNQ_CPU_DISPLAY_TEXT_COLS - col;
+    }
+
+    for (u32 dst = col; dst + count < ZYNQ_CPU_DISPLAY_TEXT_COLS; dst++) {
+        u32 dst_cell = hdmi_console_cell(row, dst);
+        u32 src_cell = hdmi_console_cell(row, dst + count);
+        hdmi_text_shadow[dst_cell] = hdmi_text_shadow[src_cell];
+        hdmi_attr_shadow[dst_cell] = hdmi_attr_shadow[src_cell];
+    }
+    for (u32 dst = ZYNQ_CPU_DISPLAY_TEXT_COLS - count; dst < ZYNQ_CPU_DISPLAY_TEXT_COLS; dst++) {
+        u32 cell = hdmi_console_cell(row, dst);
+        hdmi_text_shadow[cell] = ' ';
+        hdmi_attr_shadow[cell] = hdmi_text_attr;
+    }
+    hdmi_console_rewrite_row_words(row, col, ZYNQ_CPU_DISPLAY_TEXT_COLS);
+}
+
+static void hdmi_console_erase_cells(u32 count)
+{
+    u32 row = hdmi_text_row;
+    u32 col = hdmi_text_col;
+    u32 end;
+
+    if (row >= ZYNQ_CPU_DISPLAY_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    end = col + count;
+    if (end > ZYNQ_CPU_DISPLAY_TEXT_COLS) {
+        end = ZYNQ_CPU_DISPLAY_TEXT_COLS;
+    }
+    hdmi_console_clear_cell_range(hdmi_console_cell(row, col), hdmi_console_cell(row, end));
 }
 
 static void hdmi_console_set_cursor(u32 row, u32 col)
@@ -242,6 +362,53 @@ static void hdmi_csi_reset(void)
     hdmi_csi_have_value = 0;
 }
 
+static int hdmi_sgr_color_index(u32 sgr, u8 *color)
+{
+    if (sgr >= 30U && sgr <= 37U) {
+        *color = (u8)(sgr - 30U);
+        return 1;
+    }
+    if (sgr >= 90U && sgr <= 97U) {
+        *color = (u8)(8U + sgr - 90U);
+        return 1;
+    }
+    return 0;
+}
+
+static void hdmi_console_apply_sgr(void)
+{
+    u32 count = hdmi_csi_param_count;
+    int bright = 0;
+
+    if (count == 0U) {
+        hdmi_text_attr = 0x07U;
+        return;
+    }
+
+    for (u32 i = 0U; i < count; i++) {
+        u32 p = hdmi_csi_params[i];
+        u8 color;
+
+        if (p == 0U) {
+            hdmi_text_attr = 0x07U;
+            bright = 0;
+        } else if (p == 1U) {
+            bright = 1;
+            hdmi_text_attr = (u8)((hdmi_text_attr & 0x07U) | 0x08U);
+        } else if (p == 22U) {
+            bright = 0;
+            hdmi_text_attr = (u8)(hdmi_text_attr & 0xf7U);
+        } else if (p == 39U) {
+            hdmi_text_attr = 0x07U;
+        } else if (hdmi_sgr_color_index(p, &color)) {
+            if (bright && color < 8U) {
+                color = (u8)(color | 0x08U);
+            }
+            hdmi_text_attr = color;
+        }
+    }
+}
+
 static void hdmi_console_apply_csi(u32 final_ch)
 {
     u32 p0 = (hdmi_csi_param_count > 0U) ? hdmi_csi_params[0] : 0U;
@@ -250,6 +417,9 @@ static void hdmi_console_apply_csi(u32 final_ch)
     u32 n;
 
     switch (final_ch) {
+    case '@':
+        hdmi_console_insert_cells(hdmi_csi_param_or(0U, 1U));
+        break;
     case 'J':
         if (p0 == 2U || p0 == 3U) {
             hdmi_console_clear_shadow();
@@ -275,6 +445,12 @@ static void hdmi_console_apply_csi(u32 final_ch)
         }
         hdmi_console_clear_cell_range(start, end);
         break;
+    case 'X':
+        hdmi_console_erase_cells(hdmi_csi_param_or(0U, 1U));
+        break;
+    case 'P':
+        hdmi_console_delete_cells(hdmi_csi_param_or(0U, 1U));
+        break;
     case 'H':
     case 'f':
         hdmi_console_set_cursor(hdmi_csi_param_or(0U, 1U) - 1U,
@@ -291,6 +467,14 @@ static void hdmi_console_apply_csi(u32 final_ch)
         n = hdmi_csi_param_or(0U, 1U);
         hdmi_console_set_cursor(hdmi_text_row + n, hdmi_text_col);
         break;
+    case 'E':
+        n = hdmi_csi_param_or(0U, 1U);
+        hdmi_console_set_cursor(hdmi_text_row + n, 0U);
+        break;
+    case 'F':
+        n = hdmi_csi_param_or(0U, 1U);
+        hdmi_console_set_cursor((n > hdmi_text_row) ? 0U : (hdmi_text_row - n), 0U);
+        break;
     case 'C':
         n = hdmi_csi_param_or(0U, 1U);
         hdmi_console_set_cursor(hdmi_text_row, hdmi_text_col + n);
@@ -299,7 +483,11 @@ static void hdmi_console_apply_csi(u32 final_ch)
         n = hdmi_csi_param_or(0U, 1U);
         hdmi_text_col = (n > hdmi_text_col) ? 0U : (hdmi_text_col - n);
         break;
+    case 'd':
+        hdmi_console_set_cursor(hdmi_csi_param_or(0U, 1U) - 1U, hdmi_text_col);
+        break;
     case 'm':
+        hdmi_console_apply_sgr();
         break;
     default:
         break;
@@ -400,16 +588,24 @@ static void hdmi_console_puts(const char *s)
 
 static void hdmi_console_init(void)
 {
+    xil_printf("HDMI init: shadow\r\n");
     hdmi_console_clear_shadow();
+    xil_printf("HDMI init: mode\r\n");
     Xil_Out32(ZYNQ_CPU_DISPLAY_MODE, 2U);
+    xil_printf("HDMI init: bg\r\n");
     Xil_Out32(ZYNQ_CPU_DISPLAY_BG, 0x00000000U);
+    xil_printf("HDMI init: font\r\n");
     hdmi_console_upload_font();
+    xil_printf("HDMI init: text clear\r\n");
     Xil_Out32(ZYNQ_CPU_DISPLAY_TEXT_CTRL,
               ZYNQ_CPU_DISPLAY_TEXT_ENABLE | ZYNQ_CPU_DISPLAY_TEXT_CLEAR);
     for (volatile u32 delay = 0U; delay < 10000U; delay++) {
     }
+    xil_printf("HDMI init: repaint\r\n");
     hdmi_console_repaint();
+    xil_printf("HDMI init: enable\r\n");
     Xil_Out32(ZYNQ_CPU_DISPLAY_CONTROL, ZYNQ_CPU_DISPLAY_CONTROL_ENABLE);
+    xil_printf("HDMI init: done\r\n");
 }
 
 static void print_sv32_pte(const char *name, const char *slot, u32 idx, u32 pte_addr, u32 pte)
@@ -618,7 +814,7 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
 
     if (*started == 0) {
         xil_printf("\r\nLinux SBI console mirror\r\n");
-        hdmi_console_puts("\nLinux SBI console mirror\n");
+        hdmi_console_puts("\n\x1b[1;34mLinux SBI console mirror\x1b[0m\n");
         *started = 1;
     }
 
@@ -637,6 +833,7 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
         if (ch == '\n') {
             if (colored_line != 0) {
                 xil_printf("\x1b[0m");
+                hdmi_console_puts("\x1b[0m");
                 colored_line = 0;
             }
             xil_printf("\r\n");
@@ -646,7 +843,9 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
         } else if (ch != '\r') {
             if (loglevel_match == 1U) {
                 if (ch >= '0' && ch <= '7') {
-                    xil_printf("%s", linux_loglevel_color(ch - '0'));
+                    const char *color = linux_loglevel_color(ch - '0');
+                    xil_printf("%s", color);
+                    hdmi_console_puts(color);
                     colored_line = 1;
                     loglevel_match = 2U;
                 } else {
@@ -853,13 +1052,12 @@ restart_linux_boot:
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
     XTime_GetTime(&boot_start_time);
 
-    hdmi_console_init();
-    hdmi_console_puts("ZYNQ_CPU Linux boot launcher\n");
-
     xil_printf("\r\n");
     xil_printf("> ZYNQ_CPU Linux boot launcher\r\n");
     xil_printf("Diag rev: linux_bring_up\r\n");
     xil_printf("Boot count: %u\r\n", (unsigned int)boot_count);
+    hdmi_console_init();
+    hdmi_console_puts("\x1b[1;36mZYNQ_CPU Linux boot launcher\x1b[0m\n");
 
     if (boot_artifacts_backed_up != 0) {
         copy_words_32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR,
