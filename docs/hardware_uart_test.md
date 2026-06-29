@@ -166,7 +166,7 @@ A currently healthy Linux boot run should include:
 ```text
 > ZYNQ_CPU Linux boot launcher
 Kernel CPU: 0x80400000
-DTB CPU: 0x81600000
+DTB CPU: 0x82000000
 IMEM verify: 0 errors
 Releasing PL CPU at Linux entry
 

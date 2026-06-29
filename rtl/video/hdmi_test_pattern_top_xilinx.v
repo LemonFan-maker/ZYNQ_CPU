@@ -56,12 +56,12 @@ module hdmi_test_pattern_top_xilinx (
         .BANDWIDTH("OPTIMIZED"),
         .CLKIN1_PERIOD(13.333),
         .DIVCLK_DIVIDE(5),
-        .CLKFBOUT_MULT_F(49.500),
+        .CLKFBOUT_MULT_F(44.500),
         .CLKFBOUT_PHASE(0.000),
         .CLKOUT0_DIVIDE_F(10.000),
         .CLKOUT0_PHASE(0.000),
         .CLKOUT0_DUTY_CYCLE(0.500),
-        .CLKOUT1_DIVIDE(2),
+        .CLKOUT1_DIVIDE(1),
         .CLKOUT1_PHASE(0.000),
         .CLKOUT1_DUTY_CYCLE(0.500)
     ) u_mmcm (

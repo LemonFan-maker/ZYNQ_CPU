@@ -188,11 +188,11 @@ python3 "$repo_dir/scripts/make_zx32sim_linux_layout_blobs.py" \
 
 python3 -m tools.zx32sim.main "$build_dir/linux_image_layout_smoke.elf" \
     --load-raw 0x80400000="$build_dir/linux_image.bin" \
-    --load-raw 0x81600000="$build_dir/linux_dtb.bin" \
+    --load-raw 0x82000000="$build_dir/linux_dtb.bin" \
     --max-steps 1000 \
     --stop-pc 0x150 \
     --poke-word 0x20010300=0x80400000 \
-    --poke-word 0x20010304=0x81600000 \
+    --poke-word 0x20010304=0x82000000 \
     --expect-word 0x20010330=0xedfe0dd0 \
     --expect-word 0x2001036c=0x0000106f \
     --expect-word 0x20010370=0x00400000 \

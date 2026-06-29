@@ -119,12 +119,16 @@ The board and simulator DTS files expose a 1 GiB CPU DDR window and reserve `0xb
 | `0x20` | current pixel | debug readback `{y[15:0], x[15:0]}` |
 | `0x34` | FIFO submit/status | write bit 0 to submit opcode bits `[7:4]`; read empty/full/count |
 | `0x38` | command done count | number of completed FIFO/direct commands |
+| `0x3c` | total cycles | free-running 32-bit GPU clock-domain sample counter |
+| `0x40` | busy cycles | cycles with an active direct/FIFO command or pending launch |
+| `0x44` | DDR stall cycles | cycles where the renderer has a pixel write ready but DDR is not ready |
+| `0x48` | write count | total accepted framebuffer pixel writes |
 
 The renderer only issues DDR writes when the CPU demand path and D-cache prefetch path are idle. GPU writes invalidate matching I-cache and D-cache lines so CPU readback does not reuse stale cached data.
 
 While the renderer is busy, configuration writes are ignored. Status W1C writes and the control soft-reset bit remain accepted.
 
-The current RTL tests cover direct module operation and SoC-level DDR writeback through the AXI bridge. Linux userspace smoke/demo/image-viewer binaries can configure the renderer or write XRGB8888 pixels through `/dev/mem`. Triangle rasterization, texture reads, interrupts, and Linux drivers are not implemented yet.
+The current RTL tests cover direct module operation and SoC-level DDR writeback through the AXI bridge. Linux userspace smoke/demo/image-viewer binaries can configure the renderer or write XRGB8888 pixels through `/dev/mem`. `zx32_nvtop` computes utilization from deltas of `busy_cycles / total_cycles`, and `zx32_fastfetch` prints a one-shot system/GPU summary. Triangle rasterization, texture reads, interrupts, and Linux drivers are not implemented yet.
 
 ## Display and HDMI Bring-Up
 
@@ -139,7 +143,7 @@ The initial board path targets AX7020 HDMI OUT on ZYNQ PL BANK34. The checked-in
 | `HDMI_D1_P/N` | `Y18` / `Y19` |
 | `HDMI_D2_P/N` | `Y16` / `Y17` |
 
-The current Vivado HDMI cell generates a 1920x1080 boot console/test-pattern signal from the PS FCLK-derived HDMI MMCM. The timing-clean board bring-up mode is 1920x1080@30 so the 5x TMDS serializer clock stays inside the XC7Z020-2 OSERDESE2/BUFIO period limits. It does not yet scan VRAM. The next hardware step is to add an independent burst display-DMA read master and line buffers before attempting 1080p60 framebuffer display.
+The current Vivado HDMI cell generates a 1920x1080 boot console/test-pattern signal from the PS FCLK-derived HDMI MMCM. The board bring-up mode is 1920x1080@60 reduced blanking, using an approximately 133.5 MHz pixel clock and a 667.5 MHz 5x TMDS serializer clock so the OSERDESE2 path remains inside the XC7Z020-2 timing limits. It does not yet scan VRAM. The next hardware step is to add an independent burst display-DMA read master and line buffers before attaching framebuffer display.
 
 PL CPU display-control base address: `0x1008_0000`
 
@@ -150,7 +154,7 @@ PL CPU display-control base address: `0x1008_0000`
 | `0x08` | framebuffer address | default `0xbc00_0000` |
 | `0x0c` | framebuffer stride | bytes per row, default `1920 * 4` |
 | `0x10` | framebuffer size | `{height[15:0], width[15:0]}` |
-| `0x14` | mode | `0=640x480 timing`, `1=1280x720 timing`, `2=1920x1080 timing`; the current fixed HDMI MMCM uses mode 2 at 30 Hz |
+| `0x14` | mode | `0=640x480 timing`, `1=1280x720 timing`, `2=1920x1080 timing`; the current fixed HDMI MMCM uses mode 2 at 60 Hz |
 | `0x18` | background color | XRGB8888-style color used by test/fallback paths |
 | `0x1c` | underflow count | future DMA underflow counter |
 | `0x20` | scan position | `{v_count[15:0], h_count[15:0]}` |
@@ -201,10 +205,10 @@ The architecture now boots a mainline RV32 Linux kernel to an embedded Buildroot
 
 ```text
 PS launcher
-  -> Linux Image at CPU 0x8040_0000 / PS 0x0050_0000
-  -> DTB at CPU 0x8160_0000 / PS 0x0170_0000
+  -> Linux Image at CPU 0x8040_0000 / PS 0x0040_0000
+  -> DTB at CPU 0x8200_0000 / PS 0x0200_0000
   -> M-mode SBI firmware in IMEM
-  -> Linux S-mode entry with a0=0, a1=0x8160_0000, satp=0
+  -> Linux S-mode entry with a0=0, a1=0x8200_0000, satp=0
   -> /init -> /sbin/init from built-in Buildroot initramfs
 ```
 

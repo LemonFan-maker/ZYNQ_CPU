@@ -6,6 +6,6 @@ source ./build/vivado_hw/zynq_cpu_hw.gen/sources_1/bd/zynq_cpu_system/ip/zynq_cp
 ps7_init
 ps7_post_config
 dow -data ./build/linux-mainline-rv32/arch/riscv/boot/Image 0x00400000
-dow -data ./build/linux/zynq_cpu.dtb 0x01600000
+dow -data ./build/linux/zynq_cpu.dtb 0x02000000
 dow ./hw_bringup/build/ps_linux_boot.elf
 con

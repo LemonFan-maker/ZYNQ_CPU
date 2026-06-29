@@ -33,8 +33,8 @@ The simulator intentionally follows the board path for the core Linux boot:
 
 - M-mode firmware starts in local IMEM at `0x00000000`.
 - Linux `Image` is loaded at CPU address `0x80400000`.
-- DTB is loaded at CPU address `0x81600000`.
-- The firmware enters Linux in S-mode with `a0=0`, `a1=0x81600000`, and `satp=0`.
+- DTB is loaded at CPU address `0x82000000`.
+- The firmware enters Linux in S-mode with `a0=0`, `a1=0x82000000`, and `satp=0`.
 - Linux uses SBI console put/get and SBI TIME through the local firmware shim.
 
 ## Prerequisites

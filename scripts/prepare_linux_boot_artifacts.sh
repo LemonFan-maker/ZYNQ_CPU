@@ -13,8 +13,8 @@ manifest="$artifact_dir/boot_artifacts.env"
 
 kernel_cpu_addr="0x80400000"
 kernel_ps_addr="0x00400000"
-dtb_cpu_addr="0x81600000"
-dtb_ps_addr="0x01600000"
+dtb_cpu_addr="0x82000000"
+dtb_ps_addr="0x02000000"
 
 if [[ ! -f "$image" ]]; then
     echo "Linux Image not found: $image" >&2

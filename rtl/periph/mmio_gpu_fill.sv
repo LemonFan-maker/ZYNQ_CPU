@@ -63,6 +63,10 @@ module mmio_gpu_fill (
     logic [2:0]  fifo_rd_q;
     logic [2:0]  fifo_count_q;
     logic [31:0] cmd_done_count_q;
+    logic [31:0] perf_total_cycles_q;
+    logic [31:0] perf_busy_cycles_q;
+    logic [31:0] perf_ddr_stall_cycles_q;
+    logic [31:0] perf_write_count_q;
 
     logic [15:0] start_x;
     logic [15:0] start_y;
@@ -89,6 +93,7 @@ module mmio_gpu_fill (
     logic        start_accept_req;
     logic        submit_req;
     logic        soft_reset_req;
+    logic        perf_clear_req;
     logic        invalid_start;
     logic        invalid_submit;
     logic        launch_req;
@@ -133,6 +138,7 @@ module mmio_gpu_fill (
     assign start_accept_req = start_req && !start_wait_q;
     assign submit_req = valid && we && addr[7:2] == 6'h0d && wstrb[0] && wdata[0];
     assign soft_reset_req = valid && we && addr[7:2] == 6'h00 && wstrb[3] && wdata[31];
+    assign perf_clear_req = valid && we && addr[7:2] == 6'h00 && wstrb[3] && wdata[30];
     assign engine_busy = busy_q || launch_pending_q || fifo_count_q != 3'd0;
 
     assign op_is_clear = wdata[7:4] == OP_CLEAR;
@@ -223,6 +229,10 @@ module mmio_gpu_fill (
             6'h0c: rdata = cur_addr_q;
             6'h0d: rdata = {24'd0, fifo_count_q, 3'd0, fifo_count_q == CMD_FIFO_DEPTH_U, fifo_count_q == 3'd0};
             6'h0e: rdata = cmd_done_count_q;
+            6'h0f: rdata = perf_total_cycles_q;
+            6'h10: rdata = perf_busy_cycles_q;
+            6'h11: rdata = perf_ddr_stall_cycles_q;
+            6'h12: rdata = perf_write_count_q;
             default: rdata = 32'd0;
         endcase
     end
@@ -274,6 +284,10 @@ module mmio_gpu_fill (
             fifo_rd_q <= 3'd0;
             fifo_count_q <= 3'd0;
             cmd_done_count_q <= 32'd0;
+            perf_total_cycles_q <= 32'd0;
+            perf_busy_cycles_q <= 32'd0;
+            perf_ddr_stall_cycles_q <= 32'd0;
+            perf_write_count_q <= 32'd0;
             for (int i = 0; i < CMD_FIFO_DEPTH; i++) begin
                 fifo_op_q[i] <= 4'd0;
                 fifo_color_q[i] <= 32'd0;
@@ -318,6 +332,23 @@ module mmio_gpu_fill (
             fifo_count_q <= 3'd0;
             cmd_done_count_q <= 32'd0;
         end else begin
+            perf_total_cycles_q <= perf_total_cycles_q + 32'd1;
+            if (engine_busy) begin
+                perf_busy_cycles_q <= perf_busy_cycles_q + 32'd1;
+            end
+            if (ddr_valid && !ddr_ready) begin
+                perf_ddr_stall_cycles_q <= perf_ddr_stall_cycles_q + 32'd1;
+            end
+            if (ddr_valid && ddr_ready) begin
+                perf_write_count_q <= perf_write_count_q + 32'd1;
+            end
+            if (perf_clear_req) begin
+                perf_total_cycles_q <= 32'd0;
+                perf_busy_cycles_q <= 32'd0;
+                perf_ddr_stall_cycles_q <= 32'd0;
+                perf_write_count_q <= 32'd0;
+            end
+
             if (valid && we) begin
                 case (addr[7:2])
                     6'h01: begin

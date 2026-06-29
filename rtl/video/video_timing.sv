@@ -49,14 +49,14 @@ module video_timing (
             2'd2: begin
                 h_active_last = 12'd1919;
                 v_active_last = 12'd1079;
-                h_sync_start = 12'd2008;
-                h_sync_end = 12'd2051;
-                v_sync_start = 12'd1084;
-                v_sync_end = 12'd1088;
-                h_total_last = 12'd2199;
-                v_total_last = 12'd1124;
+                h_sync_start = 12'd1928;
+                h_sync_end = 12'd1959;
+                v_sync_start = 12'd1083;
+                v_sync_end = 12'd1087;
+                h_total_last = 12'd1999;
+                v_total_last = 12'd1110;
                 h_sync_pos = 1'b1;
-                v_sync_pos = 1'b1;
+                v_sync_pos = 1'b0;
             end
             default: begin
                 h_active_last = 12'd639;

@@ -189,8 +189,8 @@ class ZX32SimTests(unittest.TestCase):
                         "source ./build/vivado_hw/zynq_cpu_hw.gen/sources_1/bd/zynq_cpu_system/ip/zynq_cpu_system_processing_system7_0_0/ps7_init.tcl",
                         "ps7_init",
                         "ps7_post_config",
-                        "dow -data ./build/linux-mainline-rv32/arch/riscv/boot/Image 0x00500000",
-                        "dow -data ./build/linux/zynq_cpu.dtb 0x01700000",
+                        "dow -data ./build/linux-mainline-rv32/arch/riscv/boot/Image 0x00400000",
+                        "dow -data ./build/linux/zynq_cpu.dtb 0x02000000",
                         "dow ./hw_bringup/build/ps_linux_boot.elf",
                         "con",
                     ]
@@ -200,12 +200,12 @@ class ZX32SimTests(unittest.TestCase):
 
             plan = load_xsbl_plan(xsbl, repo, firmware)
 
-        self.assertEqual(ps_to_cpu_addr(0x00500000), 0x80400000)
-        self.assertEqual(ps_to_cpu_addr(0x01700000), 0x81600000)
-        self.assertEqual([download.cpu_addr for download in plan.data_downloads], [0x80400000, 0x81600000])
+        self.assertEqual(ps_to_cpu_addr(0x00400000), 0x80400000)
+        self.assertEqual(ps_to_cpu_addr(0x02000000), 0x82000000)
+        self.assertEqual([download.cpu_addr for download in plan.data_downloads], [0x80400000, 0x82000000])
         self.assertIn("--load-raw", plan.sim_argv())
         self.assertIn(f"0x{CPU_LINUX_ENTRY:08x}=0x80400000", plan.sim_argv())
-        self.assertIn(f"0x{CPU_LINUX_DTB:08x}=0x81600000", plan.sim_argv())
+        self.assertIn(f"0x{CPU_LINUX_DTB:08x}=0x82000000", plan.sim_argv())
 
     def test_supervisor_ecall_delegation(self) -> None:
         _cpu, mem, reason = self.run_source(

@@ -75,7 +75,7 @@ module tb_video_timing;
 
         expect_mode(2'd0, 16'd640, 16'd480, 800, 525);
         expect_mode(2'd1, 16'd1280, 16'd720, 1650, 750);
-        expect_mode(2'd2, 16'd1920, 16'd1080, 2200, 1125);
+        expect_mode(2'd2, 16'd1920, 16'd1080, 2000, 1111);
 
         $display("PASS");
         $finish;

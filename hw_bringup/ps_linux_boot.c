@@ -586,6 +586,89 @@ static void hdmi_console_puts(const char *s)
     }
 }
 
+static void hdmi_console_put_dec_u32(u32 value)
+{
+    char buf[10];
+    u32 count = 0U;
+
+    if (value == 0U) {
+        hdmi_console_putc('0');
+        return;
+    }
+    while (value != 0U && count < sizeof(buf)) {
+        buf[count] = (char)('0' + (value % 10U));
+        value /= 10U;
+        count++;
+    }
+    while (count != 0U) {
+        count--;
+        hdmi_console_putc((u8)buf[count]);
+    }
+}
+
+static void hdmi_console_put_hex32(u32 value)
+{
+    static const char hex[] = "0123456789abcdef";
+
+    hdmi_console_puts("0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        hdmi_console_putc((u8)hex[(value >> shift) & 0x0fU]);
+    }
+}
+
+static void hdmi_diag_prefix(const char *color, const char *tag)
+{
+    hdmi_console_puts("\x1b[90m[");
+    hdmi_console_puts("\x1b[1;36mzx32-diag");
+    hdmi_console_puts("\x1b[90m] ");
+    hdmi_console_puts(color);
+    hdmi_console_puts(tag);
+    hdmi_console_puts("\x1b[0m ");
+}
+
+static void hdmi_diag_line(const char *color, const char *tag, const char *message)
+{
+    hdmi_diag_prefix(color, tag);
+    hdmi_console_puts(message);
+    hdmi_console_putc('\n');
+}
+
+static void hdmi_diag_kv_hex(const char *color,
+                             const char *tag,
+                             const char *key0,
+                             u32 value0,
+                             const char *key1,
+                             u32 value1)
+{
+    hdmi_diag_prefix(color, tag);
+    hdmi_console_puts(key0);
+    hdmi_console_putc('=');
+    hdmi_console_put_hex32(value0);
+    if (key1 != NULL) {
+        hdmi_console_putc(' ');
+        hdmi_console_puts(key1);
+        hdmi_console_putc('=');
+        hdmi_console_put_hex32(value1);
+    }
+    hdmi_console_putc('\n');
+}
+
+static void hdmi_diag_elapsed(const char *label, XTime start, XTime now)
+{
+    u64 ms = boot_elapsed_ms(start, now);
+
+    hdmi_diag_prefix("\x1b[1;35m", "TIME");
+    hdmi_console_puts(label);
+    hdmi_console_puts(" elapsed=");
+    hdmi_console_put_dec_u32((u32)(ms / 1000ULL));
+    hdmi_console_putc('.');
+    hdmi_console_putc((u8)('0' + ((ms / 100ULL) % 10ULL)));
+    hdmi_console_putc((u8)('0' + ((ms / 10ULL) % 10ULL)));
+    hdmi_console_putc((u8)('0' + (ms % 10ULL)));
+    hdmi_console_putc('s');
+    hdmi_console_putc('\n');
+}
+
 static void hdmi_console_init(void)
 {
     xil_printf("HDMI init: shadow\r\n");
@@ -799,11 +882,15 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
     static const char idle_marker[] = "[zx32-init] idle";
     static const char welcome_marker[] = "Welcome to Buildroot";
     static const char login_marker[] = "buildroot login:";
+    static const char diag_marker[] = "[zx32-diag]";
     static u32 idle_match = 0U;
     static u32 welcome_match = 0U;
     static u32 login_match = 0U;
+    static u32 diag_match = 0U;
     static int at_line_start = 1;
+    static int diag_scan = 1;
     static int colored_line = 0;
+    static int hdmi_colored_line = 0;
     static u32 loglevel_match = 0U;
     u32 total = Xil_In32(CPU_LINUX_CONSOLE_RING_TOTAL);
     u32 events = 0U;
@@ -829,16 +916,23 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
         u32 idx = *last_total & (CPU_LINUX_CONSOLE_RING_BYTES - 1U);
         u32 word = Xil_In32(CPU_LINUX_CONSOLE_RING_BASE + (idx & ~3U));
         u32 ch = (word >> ((idx & 3U) * 8U)) & 0xffU;
+        int diag_marker_done = 0;
+        int loglevel_prefix_char = 0;
 
         if (ch == '\n') {
             if (colored_line != 0) {
                 xil_printf("\x1b[0m");
                 hdmi_console_puts("\x1b[0m");
                 colored_line = 0;
+            } else if (hdmi_colored_line != 0) {
+                hdmi_console_puts("\x1b[0m");
             }
+            hdmi_colored_line = 0;
             xil_printf("\r\n");
             hdmi_console_putc(ch);
             at_line_start = 1;
+            diag_scan = 1;
+            diag_match = 0U;
             loglevel_match = 0U;
         } else if (ch != '\r') {
             if (loglevel_match == 1U) {
@@ -848,6 +942,7 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
                     hdmi_console_puts(color);
                     colored_line = 1;
                     loglevel_match = 2U;
+                    loglevel_prefix_char = 1;
                 } else {
                     at_line_start = 0;
                     loglevel_match = 0U;
@@ -855,17 +950,47 @@ static u32 print_linux_console_mirror(u32 *last_total, int *started)
             } else if (loglevel_match == 2U) {
                 if (ch == '>') {
                     at_line_start = 0;
+                    loglevel_prefix_char = 1;
                 }
                 loglevel_match = 0U;
             } else if (at_line_start != 0) {
                 if (ch == '<') {
                     loglevel_match = 1U;
+                    loglevel_prefix_char = 1;
                 } else {
                     at_line_start = 0;
                 }
             }
+
+            if (diag_scan != 0) {
+                if (diag_match == 0U &&
+                    (loglevel_prefix_char != 0 ||
+                     loglevel_match == 1U ||
+                     loglevel_match == 2U)) {
+                    /* Keep scanning through an optional Linux <n> loglevel prefix. */
+                } else if (ch == (u32)diag_marker[diag_match]) {
+                    if (diag_match == 0U) {
+                        hdmi_console_puts("\x1b[1;36m");
+                        hdmi_colored_line = 1;
+                    }
+                    diag_match++;
+                    if (diag_match == (sizeof(diag_marker) - 1U)) {
+                        diag_marker_done = 1;
+                        diag_scan = 0;
+                        diag_match = 0U;
+                    }
+                } else {
+                    diag_scan = 0;
+                    diag_match = 0U;
+                }
+            }
+
             xil_printf("%c", (char)ch);
             hdmi_console_putc(ch);
+            if (diag_marker_done != 0) {
+                hdmi_console_puts("\x1b[0m\x1b[90m");
+                hdmi_colored_line = 1;
+            }
         }
 
         if (ch == (u32)idle_marker[idle_match]) {
@@ -1057,7 +1182,12 @@ restart_linux_boot:
     xil_printf("Diag rev: linux_bring_up\r\n");
     xil_printf("Boot count: %u\r\n", (unsigned int)boot_count);
     hdmi_console_init();
-    hdmi_console_puts("\x1b[1;36mZYNQ_CPU Linux boot launcher\x1b[0m\n");
+    hdmi_console_puts("\x1b[1;36mZX32 Linux boot launcher\x1b[0m");
+    hdmi_console_puts("  \x1b[90mHDMI 1920x1080@60RB\x1b[0m\n");
+    hdmi_diag_prefix("\x1b[1;36m", "BOOT");
+    hdmi_console_puts("diag_rev=linux_bring_up boot_count=");
+    hdmi_console_put_dec_u32(boot_count);
+    hdmi_console_putc('\n');
 
     if (boot_artifacts_backed_up != 0) {
         copy_words_32(ZYNQ_CPU_LINUX_KERNEL_PS_ADDR,
@@ -1066,6 +1196,9 @@ restart_linux_boot:
         xil_printf("Boot artifacts restored from PS 0x%08x bytes=0x%08x\r\n",
                    (unsigned int)ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
                    (unsigned int)ZYNQ_CPU_BOOT_BLOB_BYTES);
+        hdmi_diag_kv_hex("\x1b[1;34m", "INFO",
+                         "restore_ps", ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                         "bytes", ZYNQ_CPU_BOOT_BLOB_BYTES);
     }
 
     scratch_words = Xil_In32(ZYNQ_CPU_SCRATCH_WORDS);
@@ -1094,6 +1227,18 @@ restart_linux_boot:
     xil_printf("PS magic1: 0x%08x\r\n", (unsigned int)ps_magic1);
     xil_printf("PS magic2: 0x%08x\r\n", (unsigned int)ps_magic2);
     xil_printf("PS DTB raw: 0x%08x\r\n", (unsigned int)ps_dtb_magic);
+    hdmi_diag_kv_hex("\x1b[1;34m", "INFO",
+                     "kernel_cpu", ZYNQ_CPU_LINUX_KERNEL_CPU_ADDR,
+                     "dtb_cpu", ZYNQ_CPU_LINUX_DTB_CPU_ADDR);
+    hdmi_diag_kv_hex("\x1b[1;34m", "INFO",
+                     "kernel_ps", ZYNQ_CPU_LINUX_KERNEL_PS_ADDR,
+                     "dtb_ps", ZYNQ_CPU_LINUX_DTB_PS_ADDR);
+    hdmi_diag_prefix("\x1b[1;34m", "INFO");
+    hdmi_console_puts("scratch_words=");
+    hdmi_console_put_dec_u32(scratch_words);
+    hdmi_console_puts(" console_ring=");
+    hdmi_console_put_dec_u32(CPU_LINUX_CONSOLE_RING_BYTES);
+    hdmi_console_puts("B\n");
 
     if (ps_code0 != ZYNQ_CPU_LINUX_IMAGE_CODE0 ||
         ps_text_lo != ZYNQ_CPU_LINUX_IMAGE_TEXT_LO ||
@@ -1103,9 +1248,11 @@ restart_linux_boot:
         ps_magic2 != ZYNQ_CPU_LINUX_IMAGE_MAGIC2 ||
         ps_dtb_magic != ZYNQ_CPU_DTB_MAGIC_RAW) {
         xil_printf("Linux boot artifacts missing or at the wrong DDR address\r\n");
+        hdmi_diag_line("\x1b[1;31m", "FAIL", "Linux artifacts missing or wrong DDR address");
         while (1) {
         }
     }
+    hdmi_diag_line("\x1b[1;32m", "OK", "Linux Image and DTB headers verified");
 
     if (boot_artifacts_backed_up == 0) {
         copy_words_32(ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
@@ -1115,14 +1262,19 @@ restart_linux_boot:
         xil_printf("Boot artifacts backed up to PS 0x%08x bytes=0x%08x\r\n",
                    (unsigned int)ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
                    (unsigned int)ZYNQ_CPU_BOOT_BLOB_BYTES);
+        hdmi_diag_kv_hex("\x1b[1;34m", "INFO",
+                         "backup_ps", ZYNQ_CPU_BOOT_BACKUP_PS_ADDR,
+                         "bytes", ZYNQ_CPU_BOOT_BLOB_BYTES);
     }
 
     if (ring_offset > scratch_bytes ||
         CPU_LINUX_CONSOLE_RING_BYTES > (scratch_bytes - ring_offset)) {
         xil_printf("Linux console ring outside TX scratch aperture\r\n");
+        hdmi_diag_line("\x1b[1;31m", "FAIL", "Linux console ring outside TX scratch aperture");
         while (1) {
         }
     }
+    hdmi_diag_line("\x1b[1;32m", "OK", "SBI console ring is inside TX scratch");
 
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
     Xil_Out32(CPU_LINUX_ENTRY, ZYNQ_CPU_LINUX_KERNEL_CPU_ADDR);
@@ -1154,6 +1306,7 @@ restart_linux_boot:
                                  &firmware_entry);
     if (rc != 0) {
         xil_printf("Linux boot fw ELF rc: %d\r\n", rc);
+        hdmi_diag_line("\x1b[1;31m", "FAIL", "Linux boot firmware ELF load failed");
         while (1) {
         }
     }
@@ -1168,13 +1321,22 @@ restart_linux_boot:
     xil_printf("FW words: %u\r\n", (unsigned int)firmware_words);
     xil_printf("FW entry: 0x%08x\r\n", (unsigned int)firmware_entry);
     xil_printf("IMEM verify: %u errors\r\n", (unsigned int)verify_errors);
+    hdmi_diag_prefix("\x1b[1;34m", "INFO");
+    hdmi_console_puts("firmware_words=");
+    hdmi_console_put_dec_u32(firmware_words);
+    hdmi_console_puts(" entry=");
+    hdmi_console_put_hex32(firmware_entry);
+    hdmi_console_putc('\n');
 
     if (verify_errors != 0U) {
+        hdmi_diag_line("\x1b[1;31m", "FAIL", "IMEM verification failed");
         while (1) {
         }
     }
+    hdmi_diag_line("\x1b[1;32m", "OK", "IMEM firmware verified");
 
     xil_printf("Releasing PL CPU at Linux entry\r\n");
+    hdmi_diag_line("\x1b[1;33m", "BOOT", "releasing PL CPU at Linux entry");
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 0U);
 
     while (1) {
@@ -1208,6 +1370,7 @@ restart_linux_boot:
                 XTime_GetTime(&now);
                 xil_printf("\r\n");
                 print_boot_elapsed("Welcome to Buildroot", boot_start_time, now);
+                hdmi_diag_elapsed("Welcome to Buildroot", boot_start_time, now);
             }
             if ((console_events & 4U) != 0U && login_seen == 0) {
                 XTime now;
@@ -1216,10 +1379,12 @@ restart_linux_boot:
                 XTime_GetTime(&now);
                 xil_printf("\r\n");
                 print_boot_elapsed("buildroot login", boot_start_time, now);
+                hdmi_diag_elapsed("buildroot login", boot_start_time, now);
             }
             if ((console_events & 1U) != 0U && userspace_idle_seen == 0) {
                 userspace_idle_seen = 1;
                 xil_printf("Boot monitor: userspace idle reached\r\n");
+                hdmi_diag_line("\x1b[1;32m", "OK", "userspace idle marker reached");
                 print_linux_sbi_counters();
             }
         }
@@ -1229,9 +1394,13 @@ restart_linux_boot:
 
             XTime_GetTime(&now);
             print_boot_elapsed("Linux reboot requested", boot_start_time, now);
+            hdmi_diag_elapsed("Linux reboot requested", boot_start_time, now);
             xil_printf("Boot monitor: SBI system reset type=0x%08x reason=0x%08x\r\n",
                        (unsigned int)Xil_In32(CPU_LINUX_RESET_TYPE),
                        (unsigned int)Xil_In32(CPU_LINUX_RESET_REASON));
+            hdmi_diag_kv_hex("\x1b[1;33m", "WARN",
+                             "reset_type", Xil_In32(CPU_LINUX_RESET_TYPE),
+                             "reason", Xil_In32(CPU_LINUX_RESET_REASON));
             Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
             pulse_pl_reset();
             goto restart_linux_boot;

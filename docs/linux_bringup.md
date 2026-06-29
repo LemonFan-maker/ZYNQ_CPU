@@ -27,7 +27,7 @@ This proves the following pieces work together on hardware:
 
 - PS-side loading of the kernel Image and DTB into the PL CPU DDR window.
 - M-mode firmware handoff into the Linux kernel in S-mode.
-- Linux entry convention: `a0=0`, `a1=0x81600000`, `satp=0`.
+- Linux entry convention: `a0=0`, `a1=0x82000000`, `satp=0`.
 - SBI v0.2 base probing and TIME extension probing.
 - SBI legacy console put/get path used by early console and `hvc0`.
 - SBI timer programming and repeated Linux timer events.
@@ -39,8 +39,8 @@ This proves the following pieces work together on hardware:
 
 ```text
 PS standalone launcher
-  -> copies Linux Image to PS DDR 0x0050_0000
-  -> copies DTB to PS DDR 0x0170_0000
+  -> copies Linux Image to PS DDR 0x0040_0000
+  -> copies DTB to PS DDR 0x0200_0000
   -> loads linux_boot_firmware.zx32.s into PL CPU IMEM
   -> writes entry/DTB arguments into scratch mailbox
   -> releases the PL CPU
@@ -52,7 +52,7 @@ PL CPU M-mode firmware
   -> enters Linux S-mode at 0x8040_0000
 
 Linux kernel
-  -> consumes DTB at 0x8160_0000
+  -> consumes DTB at 0x8200_0000
   -> uses SBI console and timer
   -> mounts the built-in initramfs
   -> execs /init -> /sbin/init

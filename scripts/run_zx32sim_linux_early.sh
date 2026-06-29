@@ -49,10 +49,10 @@ fi
 
 cmd=(python3 -m tools.zx32sim.main "$firmware"
     --load-raw 0x80400000="$image"
-    --load-raw 0x81600000="$dtb"
+    --load-raw 0x82000000="$dtb"
     --max-steps "$steps"
     --poke-word 0x20010300=0x80400000
-    --poke-word 0x20010304=0x81600000
+    --poke-word 0x20010304=0x82000000
     --expect-word 0x20010240=0x4c0de00f
     --expect-word 0x20010308=9
     --dump-word 0x20010240

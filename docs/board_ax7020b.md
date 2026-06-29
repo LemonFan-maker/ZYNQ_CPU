@@ -94,8 +94,8 @@ The current Linux placement is:
 
 | Artifact | PL CPU address | PS physical address |
 | --- | ---: | ---: |
-| Linux Image | `0x8040_0000` | `0x0050_0000` |
-| DTB | `0x8160_0000` | `0x0170_0000` |
+| Linux Image | `0x8040_0000` | `0x0040_0000` |
+| DTB | `0x8200_0000` | `0x0200_0000` |
 
 ## Environment Rule
 

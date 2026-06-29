@@ -18,7 +18,7 @@ Examples:
 | `0x8000_0000` | `0x0000_0000` |
 | `0x8020_0000` | `0x0020_0000` |
 | `0x8040_0000` | `0x0040_0000` |
-| `0x8160_0000` | `0x0160_0000` |
+| `0x8200_0000` | `0x0200_0000` |
 
 ## Current Image Placement
 
@@ -26,14 +26,14 @@ Examples:
 | --- | ---: | ---: | --- |
 | M-mode firmware | `0x0000_0000` | PS writes through IMEM aperture | `linux_boot_firmware.zx32.s` |
 | Linux kernel Image | `0x8040_0000` | `0x0040_0000` | RISC-V Image with text offset `0x0040_0000` |
-| DTB | `0x8160_0000` | `0x0160_0000` | built from `linux/zynq_cpu.dts` |
+| DTB | `0x8200_0000` | `0x0200_0000` | built from `linux/zynq_cpu.dts` |
 | GPU framebuffer reserve | `0xbc00_0000` | `0x3c00_0000` | 64 MiB `no-map` VRAM |
 | boot artifact backup | `0x8410_0000` | `0x0410_0000` | 19 MiB `no-map` PS launcher backup |
 | initramfs | embedded in Image | embedded in Image | Buildroot `build/buildroot-zx32/images/rootfs.cpio` |
 | SBI console/counter scratch | `0x2001_0000` | AXI-Lite TX scratch aperture | PS-visible mailbox and ring |
 | MMIO timer | `0x1001_0000` | PL CPU MMIO | `mtime` and `mtimecmp` |
 
-The older separate DTB/initramfs placeholders at `0x8200_0000` and `0x8240_0000` are not the current boot path. The initramfs is built into the kernel Image for now.
+The older separate initramfs placeholder at `0x8240_0000` is not the current boot path. The initramfs is built into the kernel Image for now.
 
 ## Loader Validation
 
@@ -50,8 +50,8 @@ It writes `build/linux/boot_artifacts.env` with the active addresses:
 ```text
 KERNEL_CPU_ADDR=0x80400000
 KERNEL_PS_ADDR=0x00400000
-DTB_CPU_ADDR=0x81600000
-DTB_PS_ADDR=0x01600000
+DTB_CPU_ADDR=0x82000000
+DTB_PS_ADDR=0x02000000
 ```
 
 ## Entry Convention
@@ -60,7 +60,7 @@ The Linux entry convention is the standard RISC-V boot convention:
 
 ```text
 a0 = 0
-a1 = 0x81600000
+a1 = 0x82000000
 satp = 0
 privilege = S-mode
 interrupts disabled on initial entry
@@ -71,7 +71,7 @@ The PS launcher writes:
 | Scratch offset | Meaning |
 | ---: | --- |
 | `0x300` | Linux kernel entry address, currently `0x80400000` |
-| `0x304` | DTB address, currently `0x81600000` |
+| `0x304` | DTB address, currently `0x82000000` |
 
 The firmware reads these two words before entering S-mode.
 

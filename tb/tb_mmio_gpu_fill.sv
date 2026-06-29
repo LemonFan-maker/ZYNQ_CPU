@@ -217,6 +217,18 @@ module tb_mmio_gpu_fill;
                 $fatal(1, "fifo line write[%0d] mismatch: %08x", i, writes[i]);
             end
         end
+        host_read(32'h1007_003c, status);
+        if (status === 32'd0) begin
+            $fatal(1, "expected nonzero perf_total_cycles");
+        end
+        host_read(32'h1007_0040, status);
+        if (status === 32'd0) begin
+            $fatal(1, "expected nonzero perf_busy_cycles");
+        end
+        host_read(32'h1007_0048, status);
+        if (status !== 32'd26) begin
+            $fatal(1, "expected perf_write_count=26, got %08x", status);
+        end
 
         $display("PASS");
         $finish;
