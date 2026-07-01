@@ -107,6 +107,8 @@ module zx32_soc #(
     localparam logic [31:0] DISPLAY_BASE = 32'h1008_0000;
     localparam logic [31:0] SCRATCH_BASE = 32'h2000_0000;
     localparam logic [31:0] DDR_BASE     = 32'h8000_0000;
+    localparam logic [31:0] VRAM_BASE    = 32'hbc00_0000;
+    localparam logic [31:0] VRAM_END     = 32'hc000_0000;
     localparam int          ICACHE_LINES = 128;
     localparam int          DCACHE_LINES = 128;
     localparam int          ICACHE_INDEX_BITS = $clog2(ICACHE_LINES);
@@ -115,6 +117,13 @@ module zx32_soc #(
     localparam int          DCACHE_TAG_BITS = 32 - DCACHE_INDEX_BITS - 2;
     localparam int          CACHE_LINE_WORDS = 8;
     localparam logic [3:0]  CACHE_LINE_BEATS = 4'd8;
+    localparam logic [2:0]  DDR_OWNER_NONE = 3'd0;
+    localparam logic [2:0]  DDR_OWNER_GPU = 3'd1;
+    localparam logic [2:0]  DDR_OWNER_DCACHE = 3'd2;
+    localparam logic [2:0]  DDR_OWNER_DMEM = 3'd3;
+    localparam logic [2:0]  DDR_OWNER_HOST = 3'd4;
+    localparam logic [2:0]  DDR_OWNER_ICACHE = 3'd5;
+    localparam logic [2:0]  DDR_OWNER_PREFETCH = 3'd6;
 
     logic        imem_valid;
     logic [31:0] imem_addr;
@@ -155,6 +164,8 @@ module zx32_soc #(
     logic        bus_ddr_raw_selected;
     logic        dmem_ddr_raw_selected;
     logic        dmem_ddr_read_selected;
+    logic        bus_vram_selected;
+    logic        dmem_ddr_cacheable_read;
     logic        dcache_check_active;
     logic        dcache_lookup_hit;
     logic        dcache_miss_valid;
@@ -203,12 +214,15 @@ module zx32_soc #(
     logic        gpu_ready;
     logic [31:0] gpu_rdata;
     logic        gpu_ddr_valid;
+    logic        gpu_ddr_we;
     logic [31:0] gpu_ddr_addr;
     logic [31:0] gpu_ddr_wdata;
+    logic [31:0] gpu_ddr_rdata;
     logic        gpu_ddr_ready;
     logic        gpu_ddr_start;
     logic        gpu_ddr_active;
     logic        gpu_ddr_inflight;
+    logic        gpu_ddr_we_q;
     logic [31:0] gpu_ddr_addr_q;
     logic [31:0] gpu_ddr_wdata_q;
     logic        display_valid;
@@ -317,6 +331,10 @@ module zx32_soc #(
     logic [31:0] perf_cache_invalidates;
     logic [31:0] perf_ddr_busy_cycles;
     logic [31:0] perf_icache_blocked_by_dbus_cycles;
+    logic [31:0] sysmon_status;
+    logic [31:0] sysmon_temp_raw;
+    logic [31:0] sysmon_temp_millic;
+    logic [31:0] sysmon_sample_seq;
     logic        ddr_req_from_dcache_refill;
     logic        ddr_req_from_dmem_raw;
     logic        ddr_req_from_host;
@@ -341,6 +359,11 @@ module zx32_soc #(
     logic        dcache_miss_stream;
     logic [31:0] dcache_current_line_addr;
     logic [31:0] dcache_next_line_addr;
+    logic        ddr_owner_valid_q;
+    logic [2:0]  ddr_owner_q;
+    logic [31:0] ddr_owner_addr_q;
+    logic        ddr_owner_we_q;
+    logic [2:0]  ddr_owner_next;
     assign dcache_next_line_addr = {dcache_miss_addr[31:5] + 27'd1, 5'b00000};
 
     assign bus_valid = host_valid || dmem_valid;
@@ -360,14 +383,16 @@ module zx32_soc #(
     assign display_addr = bus_addr - DISPLAY_BASE;
     assign scratch_valid = bus_valid && bus_addr[31:20] == SCRATCH_BASE[31:20];
     assign bus_ddr_raw_selected = bus_valid && bus_addr[31:30] == 2'b10;
+    assign bus_vram_selected = bus_valid && bus_addr >= VRAM_BASE && bus_addr < VRAM_END;
     assign dmem_ddr_raw_selected = !host_valid && bus_ddr_raw_selected;
     assign dmem_ddr_read_selected = dmem_ddr_raw_selected && !bus_we;
+    assign dmem_ddr_cacheable_read = dmem_ddr_read_selected && !bus_vram_selected;
     assign dcache_index = bus_addr[DCACHE_INDEX_BITS+1:2];
     assign dcache_current_line_addr = {bus_addr[31:5], 5'b00000};
     assign dcache_line_base_index = {bus_addr[DCACHE_INDEX_BITS+1:5], 3'b000};
     assign dcache_tag = bus_addr[31:DCACHE_INDEX_BITS+2];
     assign dcache_write_index = bus_addr[DCACHE_INDEX_BITS+1:2];
-    assign dcache_check_active = dmem_ddr_read_selected &&
+    assign dcache_check_active = dmem_ddr_cacheable_read &&
                                !dcache_resp_valid &&
                                !dcache_miss_valid;
     assign dcache_lookup_hit = dcache_check_active &&
@@ -386,13 +411,31 @@ module zx32_soc #(
                         (icache_tags[icache_index] == icache_tag);
     assign icache_miss_start = imem_ddr_raw_selected && !icache_hit;
     assign imem_ddr_selected = icache_miss_valid || icache_miss_start;
-    assign gpu_ddr_start = gpu_ddr_valid && !gpu_ddr_inflight &&
+    always_comb begin
+        ddr_owner_next = DDR_OWNER_NONE;
+        if (gpu_ddr_active) begin
+            ddr_owner_next = DDR_OWNER_GPU;
+        end else if (dcache_miss_valid) begin
+            ddr_owner_next = DDR_OWNER_DCACHE;
+        end else if (ddr_valid && !host_valid) begin
+            ddr_owner_next = DDR_OWNER_DMEM;
+        end else if (ddr_valid && host_valid) begin
+            ddr_owner_next = DDR_OWNER_HOST;
+        end else if (imem_ddr_selected) begin
+            ddr_owner_next = DDR_OWNER_ICACHE;
+        end else if (dcache_prefetch_active || dcache_prefetch_inflight) begin
+            ddr_owner_next = DDR_OWNER_PREFETCH;
+        end
+    end
+
+    assign gpu_ddr_start = gpu_ddr_valid && !gpu_ddr_inflight && !ddr_owner_valid_q &&
                            !dcache_miss_valid && !ddr_valid && !imem_ddr_selected &&
                            !dcache_prefetch_active && !dcache_prefetch_inflight;
     assign gpu_ddr_active = gpu_ddr_inflight || gpu_ddr_start;
-    assign ddr_req_valid = gpu_ddr_active || ddr_valid || imem_ddr_selected ||
+    assign ddr_req_valid = ddr_owner_valid_q ||
+                           gpu_ddr_active || ddr_valid || imem_ddr_selected ||
                            dcache_prefetch_active || dcache_prefetch_inflight;
-    assign ddr_req_we = gpu_ddr_active ? 1'b1 :
+    assign ddr_req_we = gpu_ddr_active ? (gpu_ddr_inflight ? gpu_ddr_we_q : gpu_ddr_we) :
                         dcache_miss_valid ? 1'b0 : (ddr_valid && bus_we);
     assign ddr_req_wstrb = gpu_ddr_active ? 4'hf :
                            dcache_miss_valid ? 4'd0 : (ddr_valid ? bus_wstrb : 4'd0);
@@ -406,7 +449,8 @@ module zx32_soc #(
     assign ddr_req_wdata = gpu_ddr_inflight ? gpu_ddr_wdata_q :
                            gpu_ddr_start ? gpu_ddr_wdata :
                            dcache_miss_valid ? 32'd0 : (ddr_valid ? bus_wdata : 32'd0);
-    assign ddr_req_read_beats = (dcache_miss_valid || icache_miss_valid || icache_miss_start || dcache_prefetch_active) ?
+    assign ddr_req_read_beats = gpu_ddr_active ? 4'd1 :
+                                (dcache_miss_valid || icache_miss_valid || icache_miss_start || dcache_prefetch_active) ?
                                 CACHE_LINE_BEATS : 4'd1;
     assign dcache_prefetch_hit = dcache_prefetch_valid &&
                                  dcache_valid[dcache_prefetch_addr[DCACHE_INDEX_BITS+1:2]] &&
@@ -415,16 +459,19 @@ module zx32_soc #(
     assign dcache_prefetch_active = dcache_prefetch_valid && !dcache_prefetch_hit &&
                                     !dcache_prefetch_inflight &&
                                     !dcache_miss_valid && !ddr_valid && !imem_ddr_selected;
-    assign ddr_ready_for_demand = ddr_ready && !dcache_prefetch_inflight && !gpu_ddr_inflight;
+    assign ddr_ready_for_demand = ddr_ready &&
+                                  !(ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_GPU) &&
+                                  !dcache_prefetch_inflight && !gpu_ddr_inflight;
     assign dcache_stream_miss = dcache_last_read_line_valid &&
                                 (dcache_current_line_addr == (dcache_last_read_line_addr + 32'd32));
-    assign ddr_req_from_dcache_refill = dcache_miss_valid;
-    assign ddr_req_from_dmem_raw = !dcache_miss_valid && ddr_valid && !host_valid;
-    assign ddr_req_from_host = !dcache_miss_valid && ddr_valid && host_valid;
-    assign ddr_req_from_icache_refill = !dcache_miss_valid && !ddr_valid && imem_ddr_selected;
-    assign ddr_req_from_dcache_prefetch = !dcache_miss_valid && !ddr_valid && !imem_ddr_selected && dcache_prefetch_active;
-    assign ddr_req_from_gpu = gpu_ddr_active;
+    assign ddr_req_from_dcache_refill = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_DCACHE;
+    assign ddr_req_from_dmem_raw = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_DMEM;
+    assign ddr_req_from_host = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_HOST;
+    assign ddr_req_from_icache_refill = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_ICACHE;
+    assign ddr_req_from_dcache_prefetch = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_PREFETCH;
+    assign ddr_req_from_gpu = ddr_owner_valid_q && ddr_owner_q == DDR_OWNER_GPU;
     assign gpu_ddr_ready = ddr_ready && gpu_ddr_inflight;
+    assign gpu_ddr_rdata = ddr_rdata;
     assign icache_refill_index = icache_miss_base_index + ddr_read_beat_index[2:0];
     assign dcache_refill_index = dcache_miss_base_index + ddr_read_beat_index[2:0];
     assign icache_live_critical = ddr_read_beat_valid && icache_miss_valid && !dcache_miss_valid &&
@@ -535,6 +582,10 @@ module zx32_soc #(
             6'h38: ctrl_rdata_comb = perf_cache_invalidates;
             6'h39: ctrl_rdata_comb = perf_ddr_busy_cycles;
             6'h3a: ctrl_rdata_comb = perf_icache_blocked_by_dbus_cycles;
+            6'h3b: ctrl_rdata_comb = sysmon_status;
+            6'h3c: ctrl_rdata_comb = sysmon_temp_raw;
+            6'h3d: ctrl_rdata_comb = sysmon_temp_millic;
+            6'h3e: ctrl_rdata_comb = sysmon_sample_seq;
             default: ctrl_rdata_comb = 32'd0;
         endcase
     end
@@ -543,6 +594,10 @@ module zx32_soc #(
         if (!rst_n) begin
             cpu_reset_req <= 1'b0;
             cpu_reset_vector <= 32'd0;
+            sysmon_status <= 32'd0;
+            sysmon_temp_raw <= 32'd0;
+            sysmon_temp_millic <= 32'd0;
+            sysmon_sample_seq <= 32'd0;
             ctrl_valid_q <= 1'b0;
             ctrl_rdata_q <= 32'd0;
         end else begin
@@ -561,6 +616,14 @@ module zx32_soc #(
                         end
                     end
                 end
+                case (bus_addr[7:2])
+                    6'h3b: sysmon_status <= bus_wdata;
+                    6'h3c: sysmon_temp_raw <= bus_wdata;
+                    6'h3d: sysmon_temp_millic <= bus_wdata;
+                    6'h3e: sysmon_sample_seq <= bus_wdata;
+                    default: begin
+                    end
+                endcase
             end
         end
     end
@@ -617,13 +680,31 @@ module zx32_soc #(
             dcache_last_read_line_addr <= 32'd0;
             dcache_miss_stream <= 1'b0;
             gpu_ddr_inflight <= 1'b0;
+            gpu_ddr_we_q <= 1'b0;
             gpu_ddr_addr_q <= 32'd0;
             gpu_ddr_wdata_q <= 32'd0;
+            ddr_owner_valid_q <= 1'b0;
+            ddr_owner_q <= DDR_OWNER_NONE;
+            ddr_owner_addr_q <= 32'd0;
+            ddr_owner_we_q <= 1'b0;
         end else begin
+            if (ddr_owner_valid_q && ddr_ready) begin
+                ddr_owner_valid_q <= 1'b0;
+                ddr_owner_q <= DDR_OWNER_NONE;
+                ddr_owner_addr_q <= 32'd0;
+                ddr_owner_we_q <= 1'b0;
+            end else if (!ddr_owner_valid_q && ddr_req_valid) begin
+                ddr_owner_valid_q <= 1'b1;
+                ddr_owner_q <= ddr_owner_next;
+                ddr_owner_addr_q <= ddr_req_addr;
+                ddr_owner_we_q <= ddr_req_we;
+            end
+
             if (gpu_ddr_inflight && ddr_ready) begin
                 gpu_ddr_inflight <= 1'b0;
             end else if (gpu_ddr_start) begin
                 gpu_ddr_inflight <= 1'b1;
+                gpu_ddr_we_q <= gpu_ddr_we;
                 gpu_ddr_addr_q <= gpu_ddr_addr;
                 gpu_ddr_wdata_q <= gpu_ddr_wdata;
             end
@@ -682,7 +763,7 @@ module zx32_soc #(
             if (imem_ddr_selected && !ddr_req_from_icache_refill) begin
                 perf_icache_blocked_by_dbus_cycles <= perf_icache_blocked_by_dbus_cycles + 32'd1;
             end
-            if (ddr_read_beat_valid && icache_miss_valid && !dcache_miss_valid && !dcache_prefetch_inflight) begin
+            if (ddr_read_beat_valid && ddr_req_from_icache_refill) begin
                 perf_icache_refill_beats <= perf_icache_refill_beats + 32'd1;
                 icache_valid[icache_refill_index] <= 1'b1;
                 icache_tags[icache_refill_index] <= icache_miss_tag;
@@ -691,7 +772,7 @@ module zx32_soc #(
                     icache_refill_rdata_q <= ddr_read_beat_data;
                 end
             end
-            if (ddr_read_beat_valid && dcache_miss_valid && !dcache_prefetch_inflight) begin
+            if (ddr_read_beat_valid && ddr_req_from_dcache_refill) begin
                 perf_dcache_refill_beats <= perf_dcache_refill_beats + 32'd1;
                 dcache_valid[dcache_refill_index] <= 1'b1;
                 dcache_tags[dcache_refill_index] <= dcache_miss_tag;
@@ -700,51 +781,55 @@ module zx32_soc #(
                     dcache_refill_rdata_q <= ddr_read_beat_data;
                 end
             end
-            if (ddr_read_beat_valid && dcache_prefetch_inflight && !dcache_miss_valid && !icache_miss_valid) begin
+            if (ddr_read_beat_valid && ddr_req_from_dcache_prefetch) begin
                 perf_dcache_refill_beats <= perf_dcache_refill_beats + 32'd1;
                 dcache_valid[dcache_prefetch_base_index + ddr_read_beat_index[2:0]] <= 1'b1;
                 dcache_tags[dcache_prefetch_base_index + ddr_read_beat_index[2:0]] <= dcache_prefetch_tag;
                 dcache_data[dcache_prefetch_base_index + ddr_read_beat_index[2:0]] <= ddr_read_beat_data;
             end
             if (ddr_req_valid && ddr_ready) begin
-                if (dcache_prefetch_inflight) begin
+                if (ddr_req_from_dcache_prefetch) begin
                     dcache_prefetch_valid <= 1'b0;
                     dcache_prefetch_inflight <= 1'b0;
-                end else if (dcache_miss_valid) begin
+                end else if (ddr_req_from_dcache_refill) begin
                     perf_dmem_ddr_reqs <= perf_dmem_ddr_reqs + 32'd1;
                     dcache_miss_valid <= 1'b0;
                     dcache_resp_valid <= 1'b1;
                     dcache_resp_rdata <= dcache_live_rdata;
-                    if (dcache_miss_stream && dcache_miss_addr[31:30] == 2'b10) begin
+                    if (dcache_miss_stream &&
+                        dcache_miss_addr[31:30] == 2'b10 &&
+                        !(dcache_miss_addr >= VRAM_BASE && dcache_miss_addr < VRAM_END)) begin
                         dcache_prefetch_valid <= 1'b1;
                         dcache_prefetch_inflight <= 1'b0;
                         dcache_prefetch_addr <= dcache_next_line_addr;
                         dcache_prefetch_base_index <= {dcache_next_line_addr[DCACHE_INDEX_BITS+1:5], 3'b000};
                         dcache_prefetch_tag <= dcache_next_line_addr[31:DCACHE_INDEX_BITS+2];
                     end
-                end else if (imem_ddr_selected) begin
+                end else if (ddr_req_from_icache_refill) begin
                     perf_imem_ddr_reqs <= perf_imem_ddr_reqs + 32'd1;
                     perf_icache_misses <= perf_icache_misses + 32'd1;
                     icache_miss_valid <= 1'b0;
-                end else if (!host_valid && ddr_valid) begin
+                end else if (ddr_req_from_dmem_raw) begin
                     perf_dmem_ddr_reqs <= perf_dmem_ddr_reqs + 32'd1;
                     if (bus_we) begin
                         perf_dmem_raw_writes <= perf_dmem_raw_writes + 32'd1;
                     end else begin
                         perf_dmem_raw_reads <= perf_dmem_raw_reads + 32'd1;
                     end
-                end else if (host_valid && ddr_valid) begin
+                end else if (ddr_req_from_host) begin
                     perf_host_ddr_reqs <= perf_host_ddr_reqs + 32'd1;
                 end
-                if ((ddr_valid && bus_we) || ddr_req_from_gpu) begin
+                if ((ddr_req_from_dmem_raw && ddr_owner_we_q) ||
+                    (ddr_req_from_host && ddr_owner_we_q) ||
+                    (ddr_req_from_gpu && ddr_owner_we_q)) begin
                     perf_cache_invalidates <= perf_cache_invalidates + 32'd1;
                     icache_miss_valid <= 1'b0;
                     dcache_miss_valid <= 1'b0;
                     dcache_resp_valid <= 1'b0;
                     dcache_prefetch_valid <= 1'b0;
                     dcache_prefetch_inflight <= 1'b0;
-                    icache_valid[ddr_req_addr[ICACHE_INDEX_BITS+1:2]] <= 1'b0;
-                    dcache_valid[ddr_req_addr[DCACHE_INDEX_BITS+1:2]] <= 1'b0;
+                    icache_valid[ddr_owner_addr_q[ICACHE_INDEX_BITS+1:2]] <= 1'b0;
+                    dcache_valid[ddr_owner_addr_q[DCACHE_INDEX_BITS+1:2]] <= 1'b0;
                 end
             end else if (dcache_prefetch_active) begin
                 dcache_prefetch_inflight <= 1'b1;
@@ -908,8 +993,10 @@ module zx32_soc #(
         .ready(gpu_ready),
         .rdata(gpu_rdata),
         .ddr_valid(gpu_ddr_valid),
+        .ddr_we(gpu_ddr_we),
         .ddr_addr(gpu_ddr_addr),
         .ddr_wdata(gpu_ddr_wdata),
+        .ddr_rdata(gpu_ddr_rdata),
         .ddr_ready(gpu_ddr_ready)
     );
 

@@ -42,6 +42,7 @@ These are already represented in code, tests, or board logs:
 - GPU renderer v0 exists as an MMIO device for framebuffer clear, fill-rectangle, draw-line, and four-entry FIFO DDR writeback tests
 - Linux userspace GPU smoke test exists as `zx32_gpu_smoke`, using `/dev/mem` and the reserved `0xbc00_0000` framebuffer region
 - Linux userspace GPU demo and image viewer can write simple graphics or XRGB8888 images into the reserved VRAM region
+- Linux userspace monitoring tools include GPU utilization/VRAM reporting and a PS-published Zynq XADC temperature readout
 - host-side image conversion, XSCT/JTAG VRAM download, and PPM dump helpers exist for offline framebuffer preview
 
 ## Current Development Stage

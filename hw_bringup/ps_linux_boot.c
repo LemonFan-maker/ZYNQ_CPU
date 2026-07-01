@@ -5,6 +5,7 @@
 #include "xil_printf.h"
 #include "xiltimer.h"
 #include "bspconfig.h"
+#include "sleep.h"
 #include "xuartps_hw.h"
 #include "ps_font8x16_cascadia.h"
 #include "zx32_programs.h"
@@ -18,6 +19,23 @@
 #define ZYNQ_SLCR_FPGA_RST_CTRL 0xF8000240U
 #define ZYNQ_SLCR_UNLOCK_KEY  0x0000DF0DU
 #define ZYNQ_SLCR_LOCK_KEY    0x0000767BU
+#define ZYNQ_XADCIF_BASE      0xF8007100U
+#define ZYNQ_XADCIF_CFG       (ZYNQ_XADCIF_BASE + 0x00U)
+#define ZYNQ_XADCIF_MSTS      (ZYNQ_XADCIF_BASE + 0x0CU)
+#define ZYNQ_XADCIF_CMDFIFO   (ZYNQ_XADCIF_BASE + 0x10U)
+#define ZYNQ_XADCIF_RDFIFO    (ZYNQ_XADCIF_BASE + 0x14U)
+#define ZYNQ_XADCIF_MCTL      (ZYNQ_XADCIF_BASE + 0x18U)
+#define ZYNQ_XADCIF_UNLOCK    (ZYNQ_XADCIF_BASE + 0x34U)
+#define ZYNQ_XADCIF_UNLOCK_VALUE 0x757BDF0DU
+#define ZYNQ_XADCIF_CFG_ENABLE 0x80000000U
+#define ZYNQ_XADCIF_CFG_FIFO_THRESH 0x00FF0000U
+#define ZYNQ_XADCIF_MSTS_CFIFOF 0x00000800U
+#define ZYNQ_XADCIF_MSTS_DFIFOE 0x00000100U
+#define ZYNQ_XADCIF_CMD_READ  0x04000000U
+#define ZYNQ_XADCIF_TEMP_REG  0x00U
+#define ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS 200000U
+#define ZYNQ_BOOT_MONITOR_IDLE_SLEEP_US 20000U
+#define ZYNQ_SYSMON_POLL_MS 1000ULL
 #define ZYNQ_CPU_BOOT_BACKUP_PS_ADDR 0x04100000U
 #define ZYNQ_CPU_BOOT_BLOB_BYTES     0x01300000U
 
@@ -60,6 +78,62 @@ static void pulse_pl_reset(void)
     for (volatile u32 delay = 0U; delay < 10000U; delay++) {
     }
     Xil_Out32(ZYNQ_SLCR_LOCK, ZYNQ_SLCR_LOCK_KEY);
+}
+
+static int xadcif_read_internal(u32 reg, u32 *value)
+{
+    u32 cmd = ZYNQ_XADCIF_CMD_READ | ((reg & 0x3ffU) << 16);
+
+    for (u32 timeout = 0U; timeout < 10000U; timeout++) {
+        if ((Xil_In32(ZYNQ_XADCIF_MSTS) & ZYNQ_XADCIF_MSTS_CFIFOF) == 0U) {
+            break;
+        }
+        if (timeout == 9999U) {
+            return -1;
+        }
+    }
+
+    Xil_Out32(ZYNQ_XADCIF_CMDFIFO, cmd);
+    (void)Xil_In32(ZYNQ_XADCIF_RDFIFO);
+    Xil_Out32(ZYNQ_XADCIF_CMDFIFO, 0U);
+
+    for (u32 timeout = 0U; timeout < 10000U; timeout++) {
+        if ((Xil_In32(ZYNQ_XADCIF_MSTS) & ZYNQ_XADCIF_MSTS_DFIFOE) == 0U) {
+            *value = Xil_In32(ZYNQ_XADCIF_RDFIFO) & 0xffffU;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static int xadc_raw_to_millic(u32 raw)
+{
+    return (int)((((u64)(raw & 0xffffU) * 503975ULL) + 32768ULL) / 65536ULL) - 273150;
+}
+
+static void publish_zynq_temperature(u32 *sample_seq)
+{
+    u32 raw = 0U;
+
+    Xil_Out32(ZYNQ_XADCIF_UNLOCK, ZYNQ_XADCIF_UNLOCK_VALUE);
+    Xil_Out32(ZYNQ_XADCIF_CFG,
+              Xil_In32(ZYNQ_XADCIF_CFG) |
+              ZYNQ_XADCIF_CFG_ENABLE |
+              ZYNQ_XADCIF_CFG_FIFO_THRESH);
+    Xil_Out32(ZYNQ_XADCIF_MCTL, 0U);
+
+    if (xadcif_read_internal(ZYNQ_XADCIF_TEMP_REG, &raw) == 0) {
+        Xil_Out32(ZYNQ_CPU_SYSMON_TEMP_RAW, raw);
+        Xil_Out32(ZYNQ_CPU_SYSMON_TEMP_MC, (u32)xadc_raw_to_millic(raw));
+        (*sample_seq)++;
+        Xil_Out32(ZYNQ_CPU_SYSMON_SAMPLE_SEQ, *sample_seq);
+        Xil_Out32(ZYNQ_CPU_SYSMON_STATUS,
+                  ZYNQ_CPU_SYSMON_STATUS_VALID |
+                  ZYNQ_CPU_SYSMON_STATUS_XADCIF);
+    } else {
+        Xil_Out32(ZYNQ_CPU_SYSMON_STATUS, ZYNQ_CPU_SYSMON_STATUS_XADCIF);
+    }
 }
 
 static const char *linux_loglevel_color(u32 level)
@@ -1133,6 +1207,8 @@ int main(void)
     u32 last_probe_imem = 0U;
     u32 report_count = 0U;
     u32 idle_report_count = 0U;
+    u32 sysmon_sample_seq = 0U;
+    XTime last_sysmon_time = 0;
     int linux_console_started = 0;
     int userspace_idle_seen = 0;
     int welcome_seen = 0;
@@ -1176,6 +1252,8 @@ restart_linux_boot:
 
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
     XTime_GetTime(&boot_start_time);
+    last_sysmon_time = boot_start_time;
+    publish_zynq_temperature(&sysmon_sample_seq);
 
     xil_printf("\r\n");
     xil_printf("> ZYNQ_CPU Linux boot launcher\r\n");
@@ -1357,6 +1435,7 @@ restart_linux_boot:
         u32 debug_count = Xil_In32(CPU_LINUX_DEBUG_COUNT);
         u32 unsupported_count = Xil_In32(CPU_LINUX_UNSUPPORTED_COUNT);
         u32 trap_count = Xil_In32(CPU_LINUX_TRAP_COUNT);
+        int monitor_idle = userspace_idle_seen != 0 || login_seen != 0;
 
         pump_linux_console_input();
 
@@ -1507,8 +1586,21 @@ restart_linux_boot:
             }
         }
 
-        if (report_count < boot_watchdog_reports) {
-            for (volatile u32 delay = 0U; delay < 200000U; delay++) {
+        {
+            XTime now;
+
+            XTime_GetTime(&now);
+            if (boot_elapsed_ms(last_sysmon_time, now) >= ZYNQ_SYSMON_POLL_MS) {
+                publish_zynq_temperature(&sysmon_sample_seq);
+                last_sysmon_time = now;
+            }
+        }
+
+        if (monitor_idle) {
+            usleep(ZYNQ_BOOT_MONITOR_IDLE_SLEEP_US);
+            pump_linux_console_input();
+        } else if (report_count < boot_watchdog_reports) {
+            for (volatile u32 delay = 0U; delay < ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS; delay++) {
                 if ((delay & 0x3ffU) == 0U) {
                     pump_linux_console_input();
                 }
@@ -1530,7 +1622,7 @@ restart_linux_boot:
                 report_count = 0U;
             }
         } else {
-            for (volatile u32 delay = 0U; delay < 200000U; delay++) {
+            for (volatile u32 delay = 0U; delay < ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS; delay++) {
                 if ((delay & 0x3ffU) == 0U) {
                     pump_linux_console_input();
                 }

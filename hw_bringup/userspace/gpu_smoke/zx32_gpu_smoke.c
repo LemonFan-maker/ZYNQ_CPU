@@ -18,6 +18,8 @@
 #define FB_HEIGHT        4u
 #define FB_STRIDE        (FB_WIDTH * 4u)
 #define FB_BYTES         (FB_STRIDE * FB_HEIGHT)
+#define BLIT_SRC_OFFSET  FB_BYTES
+#define FB_MAP_BYTES     (FB_BYTES + FB_STRIDE * 2u)
 
 #define GPU_CONTROL      0x00u
 #define GPU_STATUS       0x04u
@@ -34,10 +36,13 @@
 #define GPU_CUR_ADDR     0x30u
 #define GPU_CMD_SUBMIT   0x34u
 #define GPU_CMD_DONE     0x38u
+#define GPU_SRC_ADDR     0x4cu
+#define GPU_SRC_STRIDE   0x50u
 
 #define GPU_OP_CLEAR     1u
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
+#define GPU_OP_BLIT      4u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)
@@ -45,6 +50,10 @@
 #define CLEAR_COLOR      0xaabbccddu
 #define RECT_COLOR       0x11223344u
 #define LINE_COLOR       0xff00ff00u
+#define BLIT_SRC0        0x01020304u
+#define BLIT_SRC1        0x11121314u
+#define BLIT_SRC2        0x21222324u
+#define BLIT_SRC3        0x31323334u
 
 static volatile uint32_t *g_gpu;
 static int g_verbose = 1;
@@ -188,6 +197,20 @@ static int verify_pixels(volatile uint32_t *fb) {
     return errors == 0 ? 0 : -1;
 }
 
+static int verify_blit_pixels(volatile uint32_t *fb) {
+    if (fb[1u + 1u * FB_WIDTH] != BLIT_SRC0 ||
+        fb[2u + 1u * FB_WIDTH] != BLIT_SRC1 ||
+        fb[1u + 2u * FB_WIDTH] != BLIT_SRC2 ||
+        fb[2u + 2u * FB_WIDTH] != BLIT_SRC3) {
+        fprintf(stderr,
+                "blit verify failed: %08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32 "\n",
+                fb[1u + 1u * FB_WIDTH], fb[2u + 1u * FB_WIDTH],
+                fb[1u + 2u * FB_WIDTH], fb[2u + 2u * FB_WIDTH]);
+        return -1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     unsigned long gpu_base = GPU_BASE_DEFAULT;
     unsigned long fb_base = FB_BASE_DEFAULT;
@@ -211,13 +234,13 @@ int main(int argc, char **argv) {
     gpu_log("[gpu_smoke] /dev/mem opened");
 
     g_gpu = (volatile uint32_t *)map_phys(fd, gpu_base, GPU_SIZE, "gpu");
-    volatile uint32_t *fb = (volatile uint32_t *)map_phys(fd, fb_base, FB_BYTES, "framebuffer");
+    volatile uint32_t *fb = (volatile uint32_t *)map_phys(fd, fb_base, FB_MAP_BYTES, "framebuffer");
     close(fd);
     if (g_gpu == MAP_FAILED || fb == MAP_FAILED) {
         return 1;
     }
-    gpu_log("[gpu_smoke] mapped gpu=0x%08lx fb=0x%08lx fb_bytes=%u",
-            gpu_base, fb_base, FB_BYTES);
+    gpu_log("[gpu_smoke] mapped gpu=0x%08lx fb=0x%08lx fb_bytes=%u map_bytes=%u",
+            gpu_base, fb_base, FB_BYTES, FB_MAP_BYTES);
 
     for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
         fb[i] = 0u;
@@ -323,6 +346,36 @@ int main(int argc, char **argv) {
         return 1;
     }
     gpu_log("[gpu_smoke] fifo pixel verify passed");
+
+    for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        fb[i] = 0u;
+    }
+    (void)fb[0];
+    volatile uint32_t *blit_src = (volatile uint32_t *)((volatile uint8_t *)fb + BLIT_SRC_OFFSET);
+    blit_src[0] = BLIT_SRC0;
+    blit_src[1] = BLIT_SRC1;
+    blit_src[FB_WIDTH] = BLIT_SRC2;
+    blit_src[FB_WIDTH + 1u] = BLIT_SRC3;
+    gpu_log("[gpu_smoke] framebuffer prepared for blit src_offset=%u", BLIT_SRC_OFFSET);
+    mmio_write(GPU_CONTROL, 1u << 31);
+    mmio_write(GPU_FB_ADDR, (uint32_t)fb_base);
+    mmio_write(GPU_FB_STRIDE, FB_STRIDE);
+    mmio_write(GPU_FB_SIZE, (FB_HEIGHT << 16) | FB_WIDTH);
+    mmio_write(GPU_RECT_ORIGIN, (1u << 16) | 1u);
+    mmio_write(GPU_RECT_SIZE, (2u << 16) | 2u);
+    mmio_write(GPU_SRC_ADDR, (uint32_t)(fb_base + BLIT_SRC_OFFSET));
+    mmio_write(GPU_SRC_STRIDE, FB_STRIDE);
+
+    rc = start_gpu(GPU_OP_BLIT, &status);
+    if (rc != 0) {
+        fprintf(stderr, "GPU blit failed: rc=%d status=0x%08" PRIx32 "\n", rc, status);
+        return 1;
+    }
+    gpu_log("[gpu_smoke] blit complete status=0x%08" PRIx32, status);
+    if (verify_blit_pixels(fb) != 0) {
+        return 1;
+    }
+    gpu_log("[gpu_smoke] blit verify passed");
 
     printf("zx32_gpu_smoke: PASS fb=0x%08lx gpu=0x%08lx size=%ux%u stride=%u\n",
            fb_base, gpu_base, FB_WIDTH, FB_HEIGHT, FB_STRIDE);

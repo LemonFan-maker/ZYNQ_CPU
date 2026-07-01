@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "zx32_gpu_regs.h"
+#include "zx32_sysmon.h"
 
 #define C_RESET   "\033[0m"
 #define C_CYAN    "\033[36m"
@@ -178,6 +179,39 @@ static void print_gpu(void) {
            b.fb_addr, width, height);
 }
 
+static void print_zynq_temp(void) {
+    int fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (fd < 0) {
+        printf(C_CYAN "Zynq Temp: " C_RESET "N/A (/dev/mem unavailable: %s)\n",
+               strerror(errno));
+        return;
+    }
+
+    volatile uint32_t *regs = (volatile uint32_t *)map_phys(fd, ZX32_CTRL_BASE_DEFAULT,
+                                                            ZX32_CTRL_SIZE, "zx32-ctrl");
+    close(fd);
+    if (regs == MAP_FAILED) {
+        printf(C_CYAN "Zynq Temp: " C_RESET "N/A (MMIO map failed)\n");
+        return;
+    }
+
+    struct zx32_sysmon_sample s;
+    zx32_sysmon_sample(regs, &s);
+    if (!zx32_sysmon_temp_valid(&s)) {
+        printf(C_CYAN "Zynq Temp: " C_RESET "N/A status=0x%08" PRIx32 "\n", s.status);
+        return;
+    }
+
+    int32_t mc = s.temp_millic;
+    const char *sign = "";
+    if (mc < 0) {
+        sign = "-";
+        mc = -mc;
+    }
+    printf(C_CYAN "Zynq Temp: " C_RESET "%s%" PRId32 ".%03" PRId32 " C raw=0x%04" PRIx32 "\n",
+           sign, mc / 1000, mc % 1000, s.temp_raw & 0xffffu);
+}
+
 int main(void) {
     printf(C_GREEN "        ____  __  _____ ___\n");
     printf("       /_  / / / / / _ \\__ \\\n");
@@ -189,6 +223,7 @@ int main(void) {
     print_kernel();
     print_uptime();
     print_memory();
+    print_zynq_temp();
     print_gpu();
     printf(C_CYAN "Display: " C_RESET "HDMI text console / 1080p60 timing\n");
     printf(C_CYAN "Tools: " C_RESET "zx32_fastfetch, zx32_nvtop, zx32_gpu_smoke\n");

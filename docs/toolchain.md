@@ -152,7 +152,7 @@ console. This example reads a 1920x1080 framebuffer and writes a 480x270 preview
 ./scripts/dump_zx32_vram_ppm.sh /tmp/fb_preview.ppm 1920 1080 480 270
 ```
 
-The test and monitor binaries are written to the Buildroot overlay as `usr/bin/zx32_membench`, `usr/bin/zx32_gpu_smoke`, `usr/bin/zx32_image_viewer`, `usr/bin/zx32_fastfetch`, and `usr/bin/zx32_nvtop`. Rebuild the rootfs and kernel Image after running any of these scripts:
+The test and monitor binaries are written to the Buildroot overlay as `usr/bin/zx32_membench`, `usr/bin/zx32_gpu_smoke`, `usr/bin/zx32_image_viewer`, `usr/bin/zx32_fastfetch`, `usr/bin/zx32_nvtop`, and `usr/bin/zx32_temp`. Rebuild the rootfs and kernel Image after running any of these scripts:
 
 ```sh
 ./scripts/build_zx32_gpu_tools.sh
@@ -168,9 +168,12 @@ On the target, run:
 zx32_gpu_smoke
 zx32_fastfetch
 zx32_nvtop
+zx32_temp
 zx32_image_viewer raw /tmp/input.xrgb 1920 1080 /tmp/fb.ppm
 zx32_image_viewer dump 1920 1080 /tmp/fb_preview.ppm 480 270
 ```
+
+`zx32_temp` reports the Zynq on-chip XADC temperature sample that the PS Linux boot launcher publishes into the ZX32 control MMIO block at `0x100300ec..0x100300f8`.
 
 The default framebuffer smoke address is `0xbc000000`, reserved as a 64 MiB VRAM region by the board and simulator DTS files.
 

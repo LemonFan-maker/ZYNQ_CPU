@@ -77,13 +77,16 @@ module tb_zx32_soc_sv32_ddr;
     localparam logic [31:0] IMEM_BASE = 32'h0000_0000;
     localparam logic [31:0] KERNEL_CPU_BASE = 32'h8040_0000;
     localparam logic [31:0] ROOT_CPU_BASE = 32'h8080_0000;
+    localparam logic [31:0] VRAM_CPU_BASE = 32'hbc00_0000;
     localparam logic [31:0] KERNEL_PS_BASE = 32'h0040_0000;
     localparam logic [31:0] ROOT_PS_BASE = 32'h0080_0000;
+    localparam logic [31:0] VRAM_PS_BASE = 32'h3c00_0000;
     localparam logic [31:0] TRAP_MARKER_CPU = KERNEL_CPU_BASE + 32'h200;
     localparam logic [31:0] ROOT_VIRT_PTE = 32'h2010_00cf;
 
     logic [31:0] kernel_mem [0:1023];
     logic [31:0] root_mem [0:1023];
+    logic [31:0] vram_mem [0:1023];
     logic [31:0] awaddr_q;
     logic        aw_seen_q;
     logic [31:0] wdata_q;
@@ -222,6 +225,8 @@ module tb_zx32_soc_sv32_ddr;
                 ddr_read_word = kernel_mem[(addr - KERNEL_PS_BASE) >> 2];
             end else if (addr >= ROOT_PS_BASE && addr < ROOT_PS_BASE + 32'h1000) begin
                 ddr_read_word = root_mem[(addr - ROOT_PS_BASE) >> 2];
+            end else if (addr >= VRAM_PS_BASE && addr < VRAM_PS_BASE + 32'h1000) begin
+                ddr_read_word = vram_mem[(addr - VRAM_PS_BASE) >> 2];
             end else begin
                 ddr_read_word = 32'd0;
             end
@@ -247,6 +252,8 @@ module tb_zx32_soc_sv32_ddr;
                 kernel_mem[(addr - KERNEL_PS_BASE) >> 2] = new_word;
             end else if (addr >= ROOT_PS_BASE && addr < ROOT_PS_BASE + 32'h1000) begin
                 root_mem[(addr - ROOT_PS_BASE) >> 2] = new_word;
+            end else if (addr >= VRAM_PS_BASE && addr < VRAM_PS_BASE + 32'h1000) begin
+                vram_mem[(addr - VRAM_PS_BASE) >> 2] = new_word;
             end
         end
     endtask
@@ -350,6 +357,7 @@ module tb_zx32_soc_sv32_ddr;
         for (int i = 0; i < 1024; i++) begin
             kernel_mem[i] = 32'd0;
             root_mem[i] = 32'd0;
+            vram_mem[i] = 32'd0;
         end
 
         rst_n = 1'b0;
@@ -469,6 +477,67 @@ module tb_zx32_soc_sv32_ddr;
         if (kernel_mem[0] !== 32'h0102_0304 || kernel_mem[1] !== 32'h0102_0304) begin
             $fatal(1, "GPU fifo clear pixels mismatch: mem[0]=%08x mem[1]=%08x",
                    kernel_mem[0], kernel_mem[1]);
+        end
+
+        host_write(GPU_BASE + 32'h00, 32'h8000_0000);
+        vram_mem[0] = 32'hdead_beef;
+        vram_mem[4] = 32'h0000_0000;
+        host_read(VRAM_CPU_BASE, gpu_first_word);
+        if (gpu_first_word !== 32'hdead_beef) begin
+            $fatal(1, "VRAM pre-read mismatch: %08x", gpu_first_word);
+        end
+        host_write(GPU_BASE + 32'h08, VRAM_CPU_BASE);
+        host_write(GPU_BASE + 32'h0c, 32'd32);
+        host_write(GPU_BASE + 32'h10, 32'h0004_0008);
+        host_write(GPU_BASE + 32'h14, 32'hcaf0_1234);
+        host_write(GPU_BASE + 32'h00, 32'h0000_0011);
+        repeat (300) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU VRAM clear failed, status=%08x", gpu_status);
+        end
+        host_read(VRAM_CPU_BASE + 32'd16, gpu_first_word);
+        if (gpu_first_word !== 32'hcaf0_1234) begin
+            $fatal(1, "GPU VRAM readback stale: got %08x", gpu_first_word);
+        end
+
+        host_write(GPU_BASE + 32'h00, 32'h8000_0000);
+        for (int i = 0; i < 64; i++) begin
+            vram_mem[i] = 32'd0;
+        end
+        vram_mem[32] = 32'h0102_0304;
+        vram_mem[33] = 32'h1112_1314;
+        vram_mem[40] = 32'h2122_2324;
+        vram_mem[41] = 32'h3132_3334;
+        host_write(GPU_BASE + 32'h08, VRAM_CPU_BASE);
+        host_write(GPU_BASE + 32'h0c, 32'd32);
+        host_write(GPU_BASE + 32'h10, 32'h0004_0008);
+        host_write(GPU_BASE + 32'h18, 32'h0001_0001);
+        host_write(GPU_BASE + 32'h1c, 32'h0002_0002);
+        host_write(GPU_BASE + 32'h4c, VRAM_CPU_BASE + 32'd128);
+        host_write(GPU_BASE + 32'h50, 32'd32);
+        host_write(GPU_BASE + 32'h00, 32'h0000_0041);
+        repeat (500) begin
+            host_read(GPU_BASE + 32'h04, gpu_status);
+            if (gpu_status[1]) begin
+                break;
+            end
+            @(posedge clk);
+        end
+        if (gpu_status !== 32'h0000_0002) begin
+            $fatal(1, "GPU VRAM blit failed, status=%08x", gpu_status);
+        end
+        if (vram_mem[9] !== 32'h0102_0304 ||
+            vram_mem[10] !== 32'h1112_1314 ||
+            vram_mem[17] !== 32'h2122_2324 ||
+            vram_mem[18] !== 32'h3132_3334) begin
+            $fatal(1, "GPU VRAM blit pixels mismatch: mem[9]=%08x mem[10]=%08x mem[17]=%08x mem[18]=%08x",
+                   vram_mem[9], vram_mem[10], vram_mem[17], vram_mem[18]);
         end
 
         host_write(CTRL_BASE, 32'd1);

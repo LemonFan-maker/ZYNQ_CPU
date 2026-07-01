@@ -128,7 +128,7 @@ The renderer only issues DDR writes when the CPU demand path and D-cache prefetc
 
 While the renderer is busy, configuration writes are ignored. Status W1C writes and the control soft-reset bit remain accepted.
 
-The current RTL tests cover direct module operation and SoC-level DDR writeback through the AXI bridge. Linux userspace smoke/demo/image-viewer binaries can configure the renderer or write XRGB8888 pixels through `/dev/mem`. `zx32_nvtop` computes utilization from deltas of `busy_cycles / total_cycles`, and `zx32_fastfetch` prints a one-shot system/GPU summary. Triangle rasterization, texture reads, interrupts, and Linux drivers are not implemented yet.
+The current RTL tests cover direct module operation and SoC-level DDR writeback through the AXI bridge. Linux userspace smoke/demo/image-viewer binaries can configure the renderer or write XRGB8888 pixels through `/dev/mem`. `zx32_nvtop` computes utilization from deltas of `busy_cycles / total_cycles`, and `zx32_fastfetch` prints a one-shot system/GPU summary. `zx32_temp` reads the PS-published Zynq XADC temperature proxy from the ZX32 control MMIO block. Triangle rasterization, texture reads, interrupts, and Linux drivers are not implemented yet.
 
 ## Display and HDMI Bring-Up
 

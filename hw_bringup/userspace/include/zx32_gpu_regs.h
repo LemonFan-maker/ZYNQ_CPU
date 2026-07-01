@@ -28,6 +28,8 @@
 #define ZX32_GPU_BUSY_CYCLES   0x40u
 #define ZX32_GPU_STALL_CYCLES  0x44u
 #define ZX32_GPU_WRITE_COUNT   0x48u
+#define ZX32_GPU_SRC_ADDR      0x4cu
+#define ZX32_GPU_SRC_STRIDE    0x50u
 
 #define ZX32_GPU_CONTROL_START      (1u << 0)
 #define ZX32_GPU_CONTROL_PERF_CLEAR (1u << 30)
@@ -40,6 +42,7 @@
 #define ZX32_GPU_OP_CLEAR     1u
 #define ZX32_GPU_OP_FILL_RECT 2u
 #define ZX32_GPU_OP_DRAW_LINE 3u
+#define ZX32_GPU_OP_BLIT      4u
 
 static inline uint32_t zx32_gpu_rd(volatile uint32_t *regs, uint32_t off) {
     return regs[off >> 2];

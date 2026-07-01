@@ -34,10 +34,13 @@
 #define GPU_CUR_ADDR     0x30u
 #define GPU_CMD_SUBMIT   0x34u
 #define GPU_CMD_DONE     0x38u
+#define GPU_SRC_ADDR     0x4cu
+#define GPU_SRC_STRIDE   0x50u
 
 #define GPU_OP_CLEAR     1u
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
+#define GPU_OP_BLIT      4u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)

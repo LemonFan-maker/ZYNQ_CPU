@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "zx32_gpu_regs.h"
+#include "zx32_sysmon.h"
 
 #define HISTORY_LEN 64
 #define DEFAULT_INTERVAL_MS 500u
@@ -266,6 +267,7 @@ static void print_status_once(const struct gpu_sample *s) {
 
 static void draw_screen(const struct gpu_sample *prev,
                         const struct gpu_sample *cur,
+                        const struct zx32_sysmon_sample *sysmon,
                         unsigned *gpu_hist,
                         unsigned *mem_hist,
                         int hist_count) {
@@ -296,6 +298,7 @@ static void draw_screen(const struct gpu_sample *prev,
     uint64_t mem_total = 0;
     uint64_t mem_avail = 0;
     char host_mem[64] = "N/A";
+    char temp_text[32] = "N/A";
     if (read_meminfo(&mem_total, &mem_avail) == 0) {
         char total_buf[32];
         char used_buf[32];
@@ -303,6 +306,16 @@ static void draw_screen(const struct gpu_sample *prev,
         format_mib(used, used_buf, sizeof(used_buf));
         format_mib(mem_total, total_buf, sizeof(total_buf));
         snprintf(host_mem, sizeof(host_mem), "%s/%s", used_buf, total_buf);
+    }
+    if (sysmon != NULL && zx32_sysmon_temp_valid(sysmon)) {
+        int32_t mc = sysmon->temp_millic;
+        const char *sign = "";
+        if (mc < 0) {
+            sign = "-";
+            mc = -mc;
+        }
+        snprintf(temp_text, sizeof(temp_text), "%s%" PRId32 ".%03" PRId32 "C",
+                 sign, mc / 1000, mc % 1000);
     }
 
     printf("\033[H\033[2J");
@@ -320,9 +333,10 @@ static void draw_screen(const struct gpu_sample *prev,
            gpu_pct, stall_pct, cur->cmd_done, writes_per_sec, host_mem);
     printf(C_CYAN "FB  " C_RESET "0x%08" PRIx32 " %" PRIu32 "x%" PRIu32
            " stride=%" PRIu32 "  "
+           C_CYAN "TEMP " C_RESET "%s  "
            C_CYAN "GPU MEM " C_RESET "%" PRIu64 "KiB/%luKiB  "
            C_CYAN "STATUS " C_RESET "busy=%u done=%u err=%u fifo=%u\n\n",
-           cur->fb_addr, width, height, cur->fb_stride,
+           cur->fb_addr, width, height, cur->fb_stride, temp_text,
            fb_bytes / 1024u, ZX32_VRAM_BYTES / 1024u,
            !!(cur->status & ZX32_GPU_STATUS_BUSY),
            !!(cur->status & ZX32_GPU_STATUS_DONE),
@@ -373,6 +387,13 @@ int main(int argc, char **argv) {
         return 1;
     }
     volatile uint32_t *regs = (volatile uint32_t *)map_phys(fd, gpu_base, ZX32_GPU_SIZE, "gpu");
+    volatile uint32_t *sysmon_regs = NULL;
+    if (regs != MAP_FAILED) {
+        void *sysmon_map = map_phys(fd, ZX32_CTRL_BASE_DEFAULT, ZX32_CTRL_SIZE, "zx32-ctrl");
+        if (sysmon_map != MAP_FAILED) {
+            sysmon_regs = (volatile uint32_t *)sysmon_map;
+        }
+    }
     close(fd);
     if (regs == MAP_FAILED) {
         return 1;
@@ -405,8 +426,14 @@ int main(int argc, char **argv) {
     do {
         usleep(interval_ms * 1000u);
         sample_gpu(regs, &cur);
+        struct zx32_sysmon_sample sysmon;
+        struct zx32_sysmon_sample *sysmon_ptr = NULL;
+        if (sysmon_regs != NULL) {
+            zx32_sysmon_sample(sysmon_regs, &sysmon);
+            sysmon_ptr = &sysmon;
+        }
         hist_count++;
-        draw_screen(&prev, &cur, gpu_hist, mem_hist, hist_count);
+        draw_screen(&prev, &cur, sysmon_ptr, gpu_hist, mem_hist, hist_count);
         prev = cur;
         if (should_quit_from_stdin()) {
             g_stop = 1;

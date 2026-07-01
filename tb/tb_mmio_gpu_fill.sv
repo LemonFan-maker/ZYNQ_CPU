@@ -9,15 +9,19 @@ module tb_mmio_gpu_fill;
     logic ready;
     logic [31:0] rdata;
     logic ddr_valid;
+    logic ddr_we;
     logic [31:0] ddr_addr;
     logic [31:0] ddr_wdata;
+    logic [31:0] ddr_rdata;
     logic ddr_ready;
+    logic [31:0] ddr_mem [0:255];
     logic [31:0] writes [0:15];
     logic [31:0] write_addrs [0:15];
     int write_count;
 
     initial clk = 1'b0;
     always #5 clk = ~clk;
+    assign ddr_rdata = ddr_mem[(ddr_addr - 32'h8000_0000) >> 2];
 
     mmio_gpu_fill u_gpu (
         .clk(clk),
@@ -30,8 +34,10 @@ module tb_mmio_gpu_fill;
         .ready(ready),
         .rdata(rdata),
         .ddr_valid(ddr_valid),
+        .ddr_we(ddr_we),
         .ddr_addr(ddr_addr),
         .ddr_wdata(ddr_wdata),
+        .ddr_rdata(ddr_rdata),
         .ddr_ready(ddr_ready)
     );
 
@@ -80,6 +86,9 @@ module tb_mmio_gpu_fill;
         for (int i = 0; i < 16; i++) begin
             writes[i] = 32'd0;
             write_addrs[i] = 32'd0;
+        end
+        for (int i = 0; i < 256; i++) begin
+            ddr_mem[i] = 32'd0;
         end
 
         rst_n = 1'b0;
@@ -230,15 +239,61 @@ module tb_mmio_gpu_fill;
             $fatal(1, "expected perf_write_count=26, got %08x", status);
         end
 
+        host_write(32'h1007_0000, 32'h8000_0000);
+        write_count = 0;
+        for (int i = 0; i < 16; i++) begin
+            writes[i] = 32'd0;
+            write_addrs[i] = 32'd0;
+        end
+        ddr_mem[16] = 32'h0102_0304;
+        ddr_mem[17] = 32'h1112_1314;
+        ddr_mem[20] = 32'h2122_2324;
+        ddr_mem[21] = 32'h3132_3334;
+        host_write(32'h1007_0008, 32'h8000_0000);
+        host_write(32'h1007_000c, 32'd16);
+        host_write(32'h1007_0010, 32'h0004_0004);
+        host_write(32'h1007_0018, 32'h0001_0001);
+        host_write(32'h1007_001c, 32'h0002_0002);
+        host_write(32'h1007_004c, 32'h8000_0040);
+        host_write(32'h1007_0050, 32'd16);
+        host_write(32'h1007_0000, 32'h0000_0041);
+
+        repeat (100) begin
+            host_read(32'h1007_0004, status);
+            if (status[1]) break;
+            @(posedge clk);
+        end
+
+        if (status !== 32'h0000_0002) begin
+            $fatal(1, "GPU unit blit failed, status=%08x", status);
+        end
+        if (write_count !== 4) begin
+            $fatal(1, "expected 4 blit writes, got %0d", write_count);
+        end
+        if (ddr_mem[5] !== 32'h0102_0304 ||
+            ddr_mem[6] !== 32'h1112_1314 ||
+            ddr_mem[9] !== 32'h2122_2324 ||
+            ddr_mem[10] !== 32'h3132_3334) begin
+            $fatal(1, "blit destination mismatch: %08x %08x %08x %08x",
+                   ddr_mem[5], ddr_mem[6], ddr_mem[9], ddr_mem[10]);
+        end
+        host_read(32'h1007_0048, status);
+        if (status !== 32'd30) begin
+            $fatal(1, "expected perf_write_count=30 after cumulative blit, got %08x", status);
+        end
+
         $display("PASS");
         $finish;
     end
 
     always_ff @(posedge clk) begin
         if (ddr_valid && ddr_ready) begin
-            write_addrs[write_count] <= ddr_addr;
-            writes[write_count] <= ddr_wdata;
-            write_count <= write_count + 1;
+            if (ddr_we) begin
+                ddr_mem[(ddr_addr - 32'h8000_0000) >> 2] <= ddr_wdata;
+                write_addrs[write_count] <= ddr_addr;
+                writes[write_count] <= ddr_wdata;
+                write_count <= write_count + 1;
+            end
         end
     end
 endmodule

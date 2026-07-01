@@ -29,5 +29,7 @@ build_one "$repo_dir/hw_bringup/userspace/gpu_top/zx32_nvtop.c" \
           "$overlay_dir/usr/bin/zx32_nvtop"
 build_one "$repo_dir/hw_bringup/userspace/fastfetch/zx32_fastfetch.c" \
           "$overlay_dir/usr/bin/zx32_fastfetch"
+build_one "$repo_dir/hw_bringup/userspace/sysmon/zx32_temp.c" \
+          "$overlay_dir/usr/bin/zx32_temp"
 
 echo "Done."
