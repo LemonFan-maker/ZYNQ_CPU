@@ -43,6 +43,7 @@
 #define ZX32_GPU_OP_FILL_RECT 2u
 #define ZX32_GPU_OP_DRAW_LINE 3u
 #define ZX32_GPU_OP_BLIT      4u
+#define ZX32_GPU_OP_COLOR_KEY_BLIT 5u
 
 static inline uint32_t zx32_gpu_rd(volatile uint32_t *regs, uint32_t off) {
     return regs[off >> 2];

@@ -21,6 +21,7 @@ module mmio_gpu_fill (
     localparam logic [3:0] OP_FILL_RECT = 4'h2;
     localparam logic [3:0] OP_DRAW_LINE = 4'h3;
     localparam logic [3:0] OP_BLIT = 4'h4;
+    localparam logic [3:0] OP_COLOR_KEY_BLIT = 4'h5;
     localparam logic [23:0] DDR_WAIT_TIMEOUT = 24'hff_ffff;
     localparam int CMD_FIFO_DEPTH = 4;
     localparam logic [2:0] CMD_FIFO_DEPTH_U = 3'd4;
@@ -97,6 +98,7 @@ module mmio_gpu_fill (
     logic        op_is_fill_rect;
     logic        op_is_draw_line;
     logic        op_is_blit;
+    logic        op_is_color_key_blit;
     logic        unsupported_op;
     logic        invalid_rect_start;
     logic        invalid_line_start;
@@ -134,6 +136,7 @@ module mmio_gpu_fill (
     logic        launch_is_fill_rect;
     logic        launch_is_draw_line;
     logic        launch_is_blit;
+    logic        launch_is_color_key_blit;
     logic        launch_unsupported;
     logic        launch_invalid_rect;
     logic        launch_invalid_line;
@@ -150,6 +153,8 @@ module mmio_gpu_fill (
     logic [31:0] launch_start_addr_base;
     logic [31:0] launch_src_addr_base;
     logic        engine_busy;
+    logic        op_blit_like;
+    logic        color_key_skip_write;
 
     assign ready = valid && !(capture_start_req && !start_wait_q);
     assign start_req = valid && we && addr[7:2] == 6'h00 && wstrb[0] && wdata[0];
@@ -163,7 +168,9 @@ module mmio_gpu_fill (
     assign op_is_fill_rect = wdata[7:4] == OP_FILL_RECT;
     assign op_is_draw_line = wdata[7:4] == OP_DRAW_LINE;
     assign op_is_blit = wdata[7:4] == OP_BLIT;
-    assign unsupported_op = !op_is_clear && !op_is_fill_rect && !op_is_draw_line && !op_is_blit;
+    assign op_is_color_key_blit = wdata[7:4] == OP_COLOR_KEY_BLIT;
+    assign unsupported_op = !op_is_clear && !op_is_fill_rect && !op_is_draw_line &&
+                            !op_is_blit && !op_is_color_key_blit;
     assign start_x = op_is_clear ? 16'd0 : rect_x_q;
     assign start_y = op_is_clear ? 16'd0 : rect_y_q;
     assign draw_w = op_is_clear ? fb_width_q : rect_w_q;
@@ -184,14 +191,14 @@ module mmio_gpu_fill (
                            fb_addr_q[31:30] != 2'b10 ||
                            fb_stride_q == 32'd0 ||
                            (op_is_draw_line ? invalid_line_start :
-                            op_is_blit ? (invalid_rect_start || invalid_blit_start) :
+                            (op_is_blit || op_is_color_key_blit) ? (invalid_rect_start || invalid_blit_start) :
                             invalid_rect_start);
     assign invalid_submit = fifo_count_q == CMD_FIFO_DEPTH_U ||
                             unsupported_op ||
                             fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (op_is_draw_line ? invalid_line_start :
-                             op_is_blit ? (invalid_rect_start || invalid_blit_start) :
+                             (op_is_blit || op_is_color_key_blit) ? (invalid_rect_start || invalid_blit_start) :
                              invalid_rect_start);
 
     assign capture_start_req = start_accept_req && !invalid_start;
@@ -208,8 +215,10 @@ module mmio_gpu_fill (
     assign launch_is_fill_rect = launch_op == OP_FILL_RECT;
     assign launch_is_draw_line = launch_op == OP_DRAW_LINE;
     assign launch_is_blit = launch_op == OP_BLIT;
+    assign launch_is_color_key_blit = launch_op == OP_COLOR_KEY_BLIT;
     assign launch_unsupported = !launch_is_clear && !launch_is_fill_rect &&
-                                !launch_is_draw_line && !launch_is_blit;
+                                !launch_is_draw_line && !launch_is_blit &&
+                                !launch_is_color_key_blit;
     assign launch_start_x = launch_is_clear ? 16'd0 : launch_x;
     assign launch_start_y = launch_is_clear ? 16'd0 : launch_y;
     assign launch_draw_w = launch_is_clear ? fb_width_q : launch_w;
@@ -229,16 +238,20 @@ module mmio_gpu_fill (
                             fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (launch_is_draw_line ? launch_invalid_line :
-                             launch_is_blit ? (launch_invalid_rect || launch_invalid_blit) :
+                             (launch_is_blit || launch_is_color_key_blit) ?
+                             (launch_invalid_rect || launch_invalid_blit) :
                              launch_invalid_rect);
 
     assign start_addr_base = fb_addr_q + {14'd0, start_x, 2'b00};
     assign launch_start_addr_base = fb_addr_q + {14'd0, launch_start_x, 2'b00};
     assign launch_src_addr_base = launch_src_addr_q;
-    assign ddr_valid = busy_q && !addr_init_q;
-    assign ddr_we = !(op_q == OP_BLIT && !blit_write_phase_q);
-    assign ddr_addr = (op_q == OP_BLIT && !blit_write_phase_q) ? cur_src_addr_q : cur_addr_q;
-    assign ddr_wdata = (op_q == OP_BLIT) ? blit_pixel_q : active_color_q;
+    assign op_blit_like = op_q == OP_BLIT || op_q == OP_COLOR_KEY_BLIT;
+    assign color_key_skip_write = busy_q && op_q == OP_COLOR_KEY_BLIT &&
+                                  blit_write_phase_q && blit_pixel_q == active_color_q;
+    assign ddr_valid = busy_q && !addr_init_q && !color_key_skip_write;
+    assign ddr_we = !(op_blit_like && !blit_write_phase_q);
+    assign ddr_addr = (op_blit_like && !blit_write_phase_q) ? cur_src_addr_q : cur_addr_q;
+    assign ddr_wdata = op_blit_like ? blit_pixel_q : active_color_q;
     assign line_dx_s = $signed({4'd0, line_dx_q});
     assign line_dy_s = $signed({4'd0, line_dy_q});
     assign line_err2 = line_err_q <<< 1;
@@ -533,14 +546,14 @@ module mmio_gpu_fill (
                 if (addr_init_rows_q == 16'd1) begin
                     addr_init_q <= 1'b0;
                 end
-            end else if (busy_q && ddr_ready) begin
+            end else if (busy_q && (ddr_ready || color_key_skip_write)) begin
                 ddr_wait_q <= 24'd0;
-                if (op_q == OP_BLIT && !blit_write_phase_q) begin
+                if (op_blit_like && !blit_write_phase_q) begin
                     blit_pixel_q <= ddr_rdata;
                     blit_write_phase_q <= 1'b1;
                 end else begin
                     pixel_count_q <= pixel_count_q + 32'd1;
-                    if (op_q == OP_BLIT) begin
+                    if (op_blit_like) begin
                         blit_write_phase_q <= 1'b0;
                     end
                     if (op_q == OP_DRAW_LINE) begin
@@ -570,7 +583,7 @@ module mmio_gpu_fill (
                             cur_y_q <= cur_y_q + 16'd1;
                             row_start_addr_q <= row_start_addr_q + fb_stride_q;
                             cur_addr_q <= row_start_addr_q + fb_stride_q;
-                            if (op_q == OP_BLIT) begin
+                            if (op_blit_like) begin
                                 src_row_start_addr_q <= src_row_start_addr_q + src_stride_q;
                                 cur_src_addr_q <= src_row_start_addr_q + src_stride_q;
                             end
@@ -578,7 +591,7 @@ module mmio_gpu_fill (
                     end else begin
                         cur_x_q <= cur_x_q + 16'd1;
                         cur_addr_q <= cur_addr_q + 32'd4;
-                        if (op_q == OP_BLIT) begin
+                        if (op_blit_like) begin
                             cur_src_addr_q <= cur_src_addr_q + 32'd4;
                         end
                     end

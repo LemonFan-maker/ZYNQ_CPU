@@ -282,6 +282,54 @@ module tb_mmio_gpu_fill;
             $fatal(1, "expected perf_write_count=30 after cumulative blit, got %08x", status);
         end
 
+        host_write(32'h1007_0000, 32'h8000_0000);
+        write_count = 0;
+        for (int i = 0; i < 16; i++) begin
+            writes[i] = 32'd0;
+            write_addrs[i] = 32'd0;
+        end
+        ddr_mem[5] = 32'h5566_7788;
+        ddr_mem[6] = 32'h5566_7788;
+        ddr_mem[9] = 32'h5566_7788;
+        ddr_mem[10] = 32'h5566_7788;
+        ddr_mem[32] = 32'h0102_0304;
+        ddr_mem[33] = 32'h00ff_00ff;
+        ddr_mem[36] = 32'h2122_2324;
+        ddr_mem[37] = 32'h3132_3334;
+        host_write(32'h1007_0008, 32'h8000_0000);
+        host_write(32'h1007_000c, 32'd16);
+        host_write(32'h1007_0010, 32'h0004_0004);
+        host_write(32'h1007_0014, 32'h00ff_00ff);
+        host_write(32'h1007_0018, 32'h0001_0001);
+        host_write(32'h1007_001c, 32'h0002_0002);
+        host_write(32'h1007_004c, 32'h8000_0080);
+        host_write(32'h1007_0050, 32'd16);
+        host_write(32'h1007_0000, 32'h0000_0051);
+
+        repeat (100) begin
+            host_read(32'h1007_0004, status);
+            if (status[1]) break;
+            @(posedge clk);
+        end
+
+        if (status !== 32'h0000_0002) begin
+            $fatal(1, "GPU unit color-key blit failed, status=%08x", status);
+        end
+        if (write_count !== 3) begin
+            $fatal(1, "expected 3 color-key blit writes, got %0d", write_count);
+        end
+        if (ddr_mem[5] !== 32'h0102_0304 ||
+            ddr_mem[6] !== 32'h5566_7788 ||
+            ddr_mem[9] !== 32'h2122_2324 ||
+            ddr_mem[10] !== 32'h3132_3334) begin
+            $fatal(1, "color-key blit destination mismatch: %08x %08x %08x %08x",
+                   ddr_mem[5], ddr_mem[6], ddr_mem[9], ddr_mem[10]);
+        end
+        host_read(32'h1007_0048, status);
+        if (status !== 32'd33) begin
+            $fatal(1, "expected perf_write_count=33 after color-key blit, got %08x", status);
+        end
+
         $display("PASS");
         $finish;
     end

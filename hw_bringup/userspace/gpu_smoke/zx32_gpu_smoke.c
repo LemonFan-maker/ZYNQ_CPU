@@ -43,6 +43,7 @@
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
 #define GPU_OP_BLIT      4u
+#define GPU_OP_COLOR_KEY_BLIT 5u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)
@@ -54,6 +55,8 @@
 #define BLIT_SRC1        0x11121314u
 #define BLIT_SRC2        0x21222324u
 #define BLIT_SRC3        0x31323334u
+#define COLOR_KEY        0x00ff00ffu
+#define KEY_DST_SENTINEL 0x55667788u
 
 static volatile uint32_t *g_gpu;
 static int g_verbose = 1;
@@ -206,6 +209,21 @@ static int verify_blit_pixels(volatile uint32_t *fb) {
                 "blit verify failed: %08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32 "\n",
                 fb[1u + 1u * FB_WIDTH], fb[2u + 1u * FB_WIDTH],
                 fb[1u + 2u * FB_WIDTH], fb[2u + 2u * FB_WIDTH]);
+        return -1;
+    }
+    return 0;
+}
+
+static int verify_color_key_pixels(volatile uint32_t *fb) {
+    if (fb[4u + 1u * FB_WIDTH] != BLIT_SRC0 ||
+        fb[5u + 1u * FB_WIDTH] != KEY_DST_SENTINEL ||
+        fb[4u + 2u * FB_WIDTH] != BLIT_SRC2 ||
+        fb[5u + 2u * FB_WIDTH] != BLIT_SRC3) {
+        fprintf(stderr,
+                "color-key blit verify failed: %08" PRIx32 " %08" PRIx32
+                " %08" PRIx32 " %08" PRIx32 "\n",
+                fb[4u + 1u * FB_WIDTH], fb[5u + 1u * FB_WIDTH],
+                fb[4u + 2u * FB_WIDTH], fb[5u + 2u * FB_WIDTH]);
         return -1;
     }
     return 0;
@@ -376,6 +394,41 @@ int main(int argc, char **argv) {
         return 1;
     }
     gpu_log("[gpu_smoke] blit verify passed");
+
+    for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        fb[i] = 0u;
+    }
+    fb[4u + 1u * FB_WIDTH] = KEY_DST_SENTINEL;
+    fb[5u + 1u * FB_WIDTH] = KEY_DST_SENTINEL;
+    fb[4u + 2u * FB_WIDTH] = KEY_DST_SENTINEL;
+    fb[5u + 2u * FB_WIDTH] = KEY_DST_SENTINEL;
+    blit_src[0] = BLIT_SRC0;
+    blit_src[1] = COLOR_KEY;
+    blit_src[FB_WIDTH] = BLIT_SRC2;
+    blit_src[FB_WIDTH + 1u] = BLIT_SRC3;
+    gpu_log("[gpu_smoke] framebuffer prepared for color-key blit key=0x%08" PRIx32,
+            COLOR_KEY);
+    mmio_write(GPU_CONTROL, 1u << 31);
+    mmio_write(GPU_FB_ADDR, (uint32_t)fb_base);
+    mmio_write(GPU_FB_STRIDE, FB_STRIDE);
+    mmio_write(GPU_FB_SIZE, (FB_HEIGHT << 16) | FB_WIDTH);
+    mmio_write(GPU_COLOR, COLOR_KEY);
+    mmio_write(GPU_RECT_ORIGIN, (1u << 16) | 4u);
+    mmio_write(GPU_RECT_SIZE, (2u << 16) | 2u);
+    mmio_write(GPU_SRC_ADDR, (uint32_t)(fb_base + BLIT_SRC_OFFSET));
+    mmio_write(GPU_SRC_STRIDE, FB_STRIDE);
+
+    rc = start_gpu(GPU_OP_COLOR_KEY_BLIT, &status);
+    if (rc != 0) {
+        fprintf(stderr, "GPU color-key blit failed: rc=%d status=0x%08" PRIx32 "\n",
+                rc, status);
+        return 1;
+    }
+    gpu_log("[gpu_smoke] color-key blit complete status=0x%08" PRIx32, status);
+    if (verify_color_key_pixels(fb) != 0) {
+        return 1;
+    }
+    gpu_log("[gpu_smoke] color-key blit verify passed");
 
     printf("zx32_gpu_smoke: PASS fb=0x%08lx gpu=0x%08lx size=%ux%u stride=%u\n",
            fb_base, gpu_base, FB_WIDTH, FB_HEIGHT, FB_STRIDE);

@@ -41,6 +41,7 @@
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
 #define GPU_OP_BLIT      4u
+#define GPU_OP_COLOR_KEY_BLIT 5u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)
