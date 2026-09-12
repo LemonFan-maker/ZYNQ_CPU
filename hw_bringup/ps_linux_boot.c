@@ -35,13 +35,141 @@
 #define ZYNQ_XADCIF_TEMP_REG  0x00U
 #define ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS 200000U
 #define ZYNQ_BOOT_MONITOR_IDLE_SLEEP_US 20000U
+#define ZYNQ_BOOT_STALL_REPORT_MS 5000ULL
 #define ZYNQ_SYSMON_POLL_MS 1000ULL
 #define ZYNQ_CPU_BOOT_BACKUP_PS_ADDR 0x04100000U
 #define ZYNQ_CPU_BOOT_BLOB_BYTES     0x01300000U
+#define ZYNQ_CPU_VIRTIO_BLK_QUEUE_MAX 128U
+#define ZYNQ_CPU_VIRTIO_BLK_CHAIN_MAX 16U
+#define ZYNQ_CPU_VIRTIO_INPUT_QUEUE_MAX 64U
+#define ZYNQ_CPU_VIRTIO_INPUT_EVENT_RING 32U
+#define VIRTQ_DESC_F_NEXT     0x0001U
+#define VIRTQ_DESC_F_WRITE    0x0002U
+#define VIRTQ_DESC_F_INDIRECT 0x0004U
+#define VIRTIO_BLK_T_IN     0U
+#define VIRTIO_BLK_T_OUT    1U
+#define VIRTIO_BLK_T_FLUSH  4U
+#define VIRTIO_BLK_T_GET_ID 8U
+#define VIRTIO_BLK_S_OK     0U
+#define VIRTIO_BLK_S_IOERR  1U
+#define VIRTIO_BLK_S_UNSUPP 2U
+#define VIRTIO_INPUT_EV_SYN 0U
+#define VIRTIO_INPUT_EV_KEY 1U
+#define VIRTIO_INPUT_SYN_REPORT 0U
+#define VIRTIO_INPUT_KEY_ENTER 28U
+#define VIRTIO_INPUT_KEY_A 30U
+#define VIRTIO_INPUT_KEY_B 48U
+
+typedef struct {
+    u32 addr_lo;
+    u32 addr_hi;
+    u32 len;
+    u16 flags;
+    u16 next;
+} virtio_blk_desc_t;
+
+typedef struct {
+    u32 queue_num;
+    u32 queue_ready;
+    u32 desc_lo;
+    u32 desc_hi;
+    u32 avail_lo;
+    u32 avail_hi;
+    u32 used_lo;
+    u32 used_hi;
+    u32 image_ps_addr;
+    u32 image_bytes;
+    u64 capacity_sectors;
+    u16 last_avail_idx;
+} virtio_blk_backend_t;
+
+typedef struct {
+    u16 type;
+    u16 code;
+    u32 value;
+} virtio_input_event_t;
+
+typedef struct {
+    u32 queue_num;
+    u32 queue_ready;
+    u32 desc_lo;
+    u32 desc_hi;
+    u32 avail_lo;
+    u32 avail_hi;
+    u32 used_lo;
+    u32 used_hi;
+    u16 last_avail_idx;
+    virtio_input_event_t pending[ZYNQ_CPU_VIRTIO_INPUT_EVENT_RING];
+    u32 pending_head;
+    u32 pending_tail;
+    u32 dropped_events;
+} virtio_input_backend_t;
+
+static virtio_blk_backend_t virtio_blk_backend;
+static virtio_input_backend_t virtio_input_backend;
 
 static u32 cpu_ddr_to_ps_addr(u32 cpu_addr)
 {
     return cpu_addr - ZYNQ_CPU_DDR_CPU_BASE + ZYNQ_CPU_DDR_PHYS_BASE;
+}
+
+static int cpu_ddr64_to_ps_addr(u32 cpu_lo, u32 cpu_hi, u32 bytes, u32 *ps_addr)
+{
+    u64 end;
+
+    if (cpu_hi != 0U || cpu_lo < ZYNQ_CPU_DDR_CPU_BASE) {
+        return 0;
+    }
+    end = (u64)cpu_lo + (u64)bytes;
+    if (end > 0x100000000ULL || end < (u64)cpu_lo) {
+        return 0;
+    }
+    *ps_addr = cpu_ddr_to_ps_addr(cpu_lo);
+    return 1;
+}
+
+static u8 ps_read_u8(u32 addr)
+{
+    u32 word = Xil_In32(addr & ~3U);
+    return (u8)((word >> ((addr & 3U) * 8U)) & 0xffU);
+}
+
+static u16 ps_read_u16(u32 addr)
+{
+    return (u16)((u16)ps_read_u8(addr) | ((u16)ps_read_u8(addr + 1U) << 8));
+}
+
+static u32 ps_read_u32(u32 addr)
+{
+    return (u32)ps_read_u8(addr) |
+           ((u32)ps_read_u8(addr + 1U) << 8) |
+           ((u32)ps_read_u8(addr + 2U) << 16) |
+           ((u32)ps_read_u8(addr + 3U) << 24);
+}
+
+static void ps_write_u8(u32 addr, u8 value)
+{
+    u32 aligned = addr & ~3U;
+    u32 shift = (addr & 3U) * 8U;
+    u32 word = Xil_In32(aligned);
+
+    word &= ~(0xffU << shift);
+    word |= ((u32)value) << shift;
+    Xil_Out32(aligned, word);
+}
+
+static void ps_write_u16(u32 addr, u16 value)
+{
+    ps_write_u8(addr, (u8)(value & 0xffU));
+    ps_write_u8(addr + 1U, (u8)((value >> 8) & 0xffU));
+}
+
+static void ps_write_u32(u32 addr, u32 value)
+{
+    ps_write_u8(addr, (u8)(value & 0xffU));
+    ps_write_u8(addr + 1U, (u8)((value >> 8) & 0xffU));
+    ps_write_u8(addr + 2U, (u8)((value >> 16) & 0xffU));
+    ps_write_u8(addr + 3U, (u8)((value >> 24) & 0xffU));
 }
 
 static void copy_words_32(u32 dst, u32 src, u32 bytes)
@@ -133,6 +261,707 @@ static void publish_zynq_temperature(u32 *sample_seq)
                   ZYNQ_CPU_SYSMON_STATUS_XADCIF);
     } else {
         Xil_Out32(ZYNQ_CPU_SYSMON_STATUS, ZYNQ_CPU_SYSMON_STATUS_XADCIF);
+    }
+}
+
+static u32 virtio_ctrl_read64_lo(u32 lo_reg)
+{
+    return Xil_In32(lo_reg);
+}
+
+static u32 virtio_ctrl_read64_hi(u32 hi_reg)
+{
+    return Xil_In32(hi_reg);
+}
+
+static u64 virtio_blk_backend_capacity_from_metadata(virtio_blk_backend_t *state)
+{
+    u32 magic = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_IMAGE_META_PS_ADDR);
+    u32 image_ps_addr = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_IMAGE_META_IMAGE_PS);
+    u32 image_bytes = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_IMAGE_META_BYTES);
+    u64 capacity_sectors;
+
+    state->image_ps_addr = 0U;
+    state->image_bytes = 0U;
+    state->capacity_sectors = 0ULL;
+
+    if (magic != ZYNQ_CPU_VIRTIO_BLK_IMAGE_META_MAGIC ||
+        image_ps_addr != ZYNQ_CPU_VIRTIO_BLK_IMAGE_PS_ADDR ||
+        image_bytes == 0U ||
+        image_bytes > ZYNQ_CPU_VIRTIO_BLK_IMAGE_MAX_BYTES ||
+        (image_bytes % ZYNQ_CPU_VIRTIO_BLK_SECTOR_BYTES) != 0U) {
+        return 0ULL;
+    }
+
+    capacity_sectors = (u64)(image_bytes / ZYNQ_CPU_VIRTIO_BLK_SECTOR_BYTES);
+    state->image_ps_addr = image_ps_addr;
+    state->image_bytes = image_bytes;
+    state->capacity_sectors = capacity_sectors;
+    return capacity_sectors;
+}
+
+static void virtio_blk_backend_reset(void)
+{
+    u64 capacity_sectors;
+
+    virtio_blk_backend.queue_num = 0U;
+    virtio_blk_backend.queue_ready = 0U;
+    virtio_blk_backend.desc_lo = 0U;
+    virtio_blk_backend.desc_hi = 0U;
+    virtio_blk_backend.avail_lo = 0U;
+    virtio_blk_backend.avail_hi = 0U;
+    virtio_blk_backend.used_lo = 0U;
+    virtio_blk_backend.used_hi = 0U;
+    virtio_blk_backend.last_avail_idx = 0U;
+    capacity_sectors = virtio_blk_backend_capacity_from_metadata(&virtio_blk_backend);
+    Xil_Out32(ZYNQ_CPU_VIRTIO_BLK_CAPACITY_LO,
+              (u32)capacity_sectors);
+    Xil_Out32(ZYNQ_CPU_VIRTIO_BLK_CAPACITY_HI,
+              (u32)(capacity_sectors >> 32));
+    Xil_Out32(ZYNQ_CPU_VIRTIO_BLK_CONTROL,
+              ZYNQ_CPU_VIRTIO_BLK_CONTROL_NOTIFY_ACK);
+}
+
+static int virtio_blk_backend_refresh_queue(virtio_blk_backend_t *state)
+{
+    u32 queue_num = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_QUEUE_NUM);
+    u32 queue_ready = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_QUEUE_READY) & 1U;
+    u32 desc_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_BLK_DESC_LO);
+    u32 desc_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_BLK_DESC_HI);
+    u32 avail_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_BLK_AVAIL_LO);
+    u32 avail_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_BLK_AVAIL_HI);
+    u32 used_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_BLK_USED_LO);
+    u32 used_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_BLK_USED_HI);
+    int changed = (state->queue_num != queue_num ||
+                   state->queue_ready != queue_ready ||
+                   state->desc_lo != desc_lo ||
+                   state->desc_hi != desc_hi ||
+                   state->avail_lo != avail_lo ||
+                   state->avail_hi != avail_hi ||
+                   state->used_lo != used_lo ||
+                   state->used_hi != used_hi);
+
+    state->queue_num = queue_num;
+    state->queue_ready = queue_ready;
+    state->desc_lo = desc_lo;
+    state->desc_hi = desc_hi;
+    state->avail_lo = avail_lo;
+    state->avail_hi = avail_hi;
+    state->used_lo = used_lo;
+    state->used_hi = used_hi;
+    if (changed != 0) {
+        state->last_avail_idx = 0U;
+    }
+
+    return queue_ready != 0U &&
+           queue_num != 0U &&
+           queue_num <= ZYNQ_CPU_VIRTIO_BLK_QUEUE_MAX;
+}
+
+static int virtio_blk_guest_addr_add(u32 lo,
+                                     u32 hi,
+                                     u32 add,
+                                     u32 bytes,
+                                     u32 *ps_addr)
+{
+    u32 addr_lo = lo + add;
+    u32 addr_hi = hi;
+
+    if (addr_lo < lo) {
+        addr_hi++;
+    }
+    return cpu_ddr64_to_ps_addr(addr_lo, addr_hi, bytes, ps_addr);
+}
+
+static int virtio_blk_read_desc(const virtio_blk_backend_t *state,
+                                u16 index,
+                                virtio_blk_desc_t *desc)
+{
+    u32 ps_addr;
+
+    if ((u32)index >= state->queue_num ||
+        !virtio_blk_guest_addr_add(state->desc_lo,
+                                   state->desc_hi,
+                                   (u32)index * 16U,
+                                   16U,
+                                   &ps_addr)) {
+        return 0;
+    }
+
+    desc->addr_lo = ps_read_u32(ps_addr);
+    desc->addr_hi = ps_read_u32(ps_addr + 4U);
+    desc->len = ps_read_u32(ps_addr + 8U);
+    desc->flags = ps_read_u16(ps_addr + 12U);
+    desc->next = ps_read_u16(ps_addr + 14U);
+    return 1;
+}
+
+static int virtio_blk_write_to_descs(const virtio_blk_desc_t *descs,
+                                     u32 first,
+                                     u32 count,
+                                     const u8 *data,
+                                     u32 data_len,
+                                     u32 *written_len)
+{
+    u32 pos = 0U;
+
+    for (u32 i = first; i < count && pos < data_len; i++) {
+        u32 ps_addr;
+        u32 chunk;
+
+        if ((descs[i].flags & VIRTQ_DESC_F_WRITE) == 0U ||
+            !cpu_ddr64_to_ps_addr(descs[i].addr_lo,
+                                  descs[i].addr_hi,
+                                  descs[i].len,
+                                  &ps_addr)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+
+        chunk = data_len - pos;
+        if (chunk > descs[i].len) {
+            chunk = descs[i].len;
+        }
+        for (u32 j = 0U; j < chunk; j++) {
+            ps_write_u8(ps_addr + j, data[pos + j]);
+        }
+        pos += chunk;
+    }
+
+    *written_len = pos;
+    return VIRTIO_BLK_S_OK;
+}
+
+static int virtio_blk_data_desc_total(const virtio_blk_desc_t *descs,
+                                      u32 first,
+                                      u32 count,
+                                      u32 *total_len)
+{
+    u32 total = 0U;
+
+    for (u32 i = first; i < count; i++) {
+        if (descs[i].len > (0xffffffffU - total)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+        total += descs[i].len;
+    }
+
+    *total_len = total;
+    return VIRTIO_BLK_S_OK;
+}
+
+static int virtio_blk_image_addr(u64 byte_offset, u32 bytes, u32 *ps_addr)
+{
+    u64 image_bytes = (u64)virtio_blk_backend.image_bytes;
+    u64 addr;
+
+    if (virtio_blk_backend.capacity_sectors == 0ULL ||
+        image_bytes == 0ULL ||
+        byte_offset > image_bytes ||
+        (u64)bytes > (image_bytes - byte_offset)) {
+        return 0;
+    }
+
+    addr = (u64)virtio_blk_backend.image_ps_addr + byte_offset;
+    if (addr > 0xffffffffULL ||
+        (u64)bytes > (0x100000000ULL - addr)) {
+        return 0;
+    }
+
+    *ps_addr = (u32)addr;
+    return 1;
+}
+
+static int virtio_blk_copy_image_to_descs(const virtio_blk_desc_t *descs,
+                                          u32 first,
+                                          u32 count,
+                                          u32 image_ps,
+                                          u32 data_len,
+                                          u32 *written_len)
+{
+    u32 pos = 0U;
+
+    for (u32 i = first; i < count && pos < data_len; i++) {
+        u32 ps_addr;
+        u32 chunk;
+
+        if ((descs[i].flags & VIRTQ_DESC_F_WRITE) == 0U ||
+            !cpu_ddr64_to_ps_addr(descs[i].addr_lo,
+                                  descs[i].addr_hi,
+                                  descs[i].len,
+                                  &ps_addr)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+
+        chunk = data_len - pos;
+        if (chunk > descs[i].len) {
+            chunk = descs[i].len;
+        }
+        for (u32 j = 0U; j < chunk; j++) {
+            ps_write_u8(ps_addr + j, ps_read_u8(image_ps + pos + j));
+        }
+        pos += chunk;
+    }
+
+    *written_len = pos;
+    return (pos == data_len) ? VIRTIO_BLK_S_OK : VIRTIO_BLK_S_IOERR;
+}
+
+static int virtio_blk_copy_descs_to_image(const virtio_blk_desc_t *descs,
+                                          u32 first,
+                                          u32 count,
+                                          u32 image_ps,
+                                          u32 data_len)
+{
+    u32 pos = 0U;
+
+    for (u32 i = first; i < count && pos < data_len; i++) {
+        u32 ps_addr;
+        u32 chunk;
+
+        if ((descs[i].flags & VIRTQ_DESC_F_WRITE) != 0U ||
+            !cpu_ddr64_to_ps_addr(descs[i].addr_lo,
+                                  descs[i].addr_hi,
+                                  descs[i].len,
+                                  &ps_addr)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+
+        chunk = data_len - pos;
+        if (chunk > descs[i].len) {
+            chunk = descs[i].len;
+        }
+        for (u32 j = 0U; j < chunk; j++) {
+            ps_write_u8(image_ps + pos + j, ps_read_u8(ps_addr + j));
+        }
+        pos += chunk;
+    }
+
+    return (pos == data_len) ? VIRTIO_BLK_S_OK : VIRTIO_BLK_S_IOERR;
+}
+
+static u32 virtio_blk_execute_request(const virtio_blk_desc_t *chain,
+                                      u32 chain_len,
+                                      u32 *written_len)
+{
+    static const u8 ident[20] = {
+        'Z', 'X', '6', '4', '-', 'P', 'S', '-', 'D', 'I',
+        'S', 'K', 0, 0, 0, 0, 0, 0, 0, 0
+    };
+    u32 header_ps;
+    u32 request_type;
+    u32 sector_lo;
+    u32 sector_hi;
+    u32 data_written = 0U;
+    u32 data_desc_end;
+    u32 data_len = 0U;
+    u32 image_ps;
+    u64 sector;
+    u64 byte_offset;
+
+    *written_len = 1U;
+    if (chain_len < 2U ||
+        chain[0].len < 16U ||
+        (chain[0].flags & VIRTQ_DESC_F_WRITE) != 0U ||
+        (chain[chain_len - 1U].flags & VIRTQ_DESC_F_WRITE) == 0U ||
+        chain[chain_len - 1U].len < 1U ||
+        !cpu_ddr64_to_ps_addr(chain[0].addr_lo, chain[0].addr_hi, 16U, &header_ps)) {
+        return VIRTIO_BLK_S_IOERR;
+    }
+
+    request_type = ps_read_u32(header_ps);
+    sector_lo = ps_read_u32(header_ps + 8U);
+    sector_hi = ps_read_u32(header_ps + 12U);
+
+    if (request_type == VIRTIO_BLK_T_FLUSH) {
+        return VIRTIO_BLK_S_OK;
+    }
+    if (request_type == VIRTIO_BLK_T_GET_ID) {
+        u32 data_desc_count = (chain_len > 2U) ? (chain_len - 2U) : 0U;
+        u32 status = virtio_blk_write_to_descs(chain,
+                                               1U,
+                                               1U + data_desc_count,
+                                               ident,
+                                               sizeof(ident),
+                                               &data_written);
+        *written_len = data_written + 1U;
+        return status;
+    }
+
+    if (request_type == VIRTIO_BLK_T_IN || request_type == VIRTIO_BLK_T_OUT) {
+        data_desc_end = chain_len - 1U;
+        if (virtio_blk_data_desc_total(chain, 1U, data_desc_end, &data_len) !=
+            VIRTIO_BLK_S_OK ||
+            (data_len % ZYNQ_CPU_VIRTIO_BLK_SECTOR_BYTES) != 0U) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+
+        sector = ((u64)sector_hi << 32) | (u64)sector_lo;
+        if (sector > (0xffffffffffffffffULL >> 9)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+        byte_offset = sector * (u64)ZYNQ_CPU_VIRTIO_BLK_SECTOR_BYTES;
+        if (!virtio_blk_image_addr(byte_offset, data_len, &image_ps)) {
+            return VIRTIO_BLK_S_IOERR;
+        }
+
+        if (request_type == VIRTIO_BLK_T_IN) {
+            u32 status = virtio_blk_copy_image_to_descs(chain,
+                                                        1U,
+                                                        data_desc_end,
+                                                        image_ps,
+                                                        data_len,
+                                                        &data_written);
+            *written_len = data_written + 1U;
+            return status;
+        }
+
+        return virtio_blk_copy_descs_to_image(chain,
+                                              1U,
+                                              data_desc_end,
+                                              image_ps,
+                                              data_len);
+    }
+
+    return VIRTIO_BLK_S_UNSUPP;
+}
+
+static int virtio_blk_process_chain(virtio_blk_backend_t *state, u16 head)
+{
+    virtio_blk_desc_t chain[ZYNQ_CPU_VIRTIO_BLK_CHAIN_MAX];
+    u16 index = head;
+    u32 chain_len = 0U;
+    u32 status = VIRTIO_BLK_S_IOERR;
+    u32 written_len = 1U;
+    u32 status_ps;
+
+    for (u32 guard = 0U; guard < state->queue_num &&
+                        chain_len < ZYNQ_CPU_VIRTIO_BLK_CHAIN_MAX; guard++) {
+        if (!virtio_blk_read_desc(state, index, &chain[chain_len])) {
+            return 0;
+        }
+        if ((chain[chain_len].flags & VIRTQ_DESC_F_INDIRECT) != 0U) {
+            return 0;
+        }
+        chain_len++;
+        if ((chain[chain_len - 1U].flags & VIRTQ_DESC_F_NEXT) == 0U) {
+            break;
+        }
+        index = chain[chain_len - 1U].next;
+    }
+
+    if (chain_len >= 2U &&
+        cpu_ddr64_to_ps_addr(chain[chain_len - 1U].addr_lo,
+                             chain[chain_len - 1U].addr_hi,
+                             1U,
+                             &status_ps)) {
+        status = virtio_blk_execute_request(chain, chain_len, &written_len);
+        ps_write_u8(status_ps, (u8)status);
+    }
+
+    return (int)written_len;
+}
+
+static void virtio_blk_push_used(const virtio_blk_backend_t *state,
+                                 u16 head,
+                                 u32 written_len)
+{
+    u32 used_ps;
+    u16 used_idx;
+    u32 elem;
+
+    if (!cpu_ddr64_to_ps_addr(state->used_lo, state->used_hi, 4U, &used_ps)) {
+        return;
+    }
+    used_idx = ps_read_u16(used_ps + 2U);
+    elem = used_ps + 4U + (((u32)used_idx % state->queue_num) * 8U);
+    ps_write_u32(elem, (u32)head);
+    ps_write_u32(elem + 4U, written_len);
+    ps_write_u16(used_ps + 2U, (u16)(used_idx + 1U));
+}
+
+static void virtio_blk_backend_poll(void)
+{
+    u32 status = Xil_In32(ZYNQ_CPU_VIRTIO_BLK_STATUS);
+    u32 avail_ps;
+    u16 avail_idx;
+    u32 processed = 0U;
+    u32 control = ZYNQ_CPU_VIRTIO_BLK_CONTROL_NOTIFY_ACK;
+
+    if ((status & ZYNQ_CPU_VIRTIO_BLK_STATUS_NOTIFY_PENDING) == 0U) {
+        return;
+    }
+
+    if (!virtio_blk_backend_refresh_queue(&virtio_blk_backend) ||
+        !cpu_ddr64_to_ps_addr(virtio_blk_backend.avail_lo,
+                              virtio_blk_backend.avail_hi,
+                              4U,
+                              &avail_ps)) {
+        Xil_Out32(ZYNQ_CPU_VIRTIO_BLK_CONTROL, control);
+        return;
+    }
+
+    avail_idx = ps_read_u16(avail_ps + 2U);
+    while (virtio_blk_backend.last_avail_idx != avail_idx &&
+           processed < virtio_blk_backend.queue_num) {
+        u32 ring_ps;
+        u16 head;
+        int written_len;
+
+        if (!virtio_blk_guest_addr_add(virtio_blk_backend.avail_lo,
+                                       virtio_blk_backend.avail_hi,
+                                       4U + (((u32)virtio_blk_backend.last_avail_idx %
+                                              virtio_blk_backend.queue_num) * 2U),
+                                       2U,
+                                       &ring_ps)) {
+            break;
+        }
+        head = ps_read_u16(ring_ps);
+        written_len = virtio_blk_process_chain(&virtio_blk_backend, head);
+        if (written_len > 0) {
+            virtio_blk_push_used(&virtio_blk_backend, head, (u32)written_len);
+            processed++;
+        }
+        virtio_blk_backend.last_avail_idx++;
+        avail_idx = ps_read_u16(avail_ps + 2U);
+    }
+
+    if (processed != 0U) {
+        control |= ZYNQ_CPU_VIRTIO_BLK_CONTROL_RAISE_IRQ;
+    }
+    Xil_Out32(ZYNQ_CPU_VIRTIO_BLK_CONTROL, control);
+}
+
+static void virtio_input_backend_reset(void)
+{
+    virtio_input_backend.queue_num = 0U;
+    virtio_input_backend.queue_ready = 0U;
+    virtio_input_backend.desc_lo = 0U;
+    virtio_input_backend.desc_hi = 0U;
+    virtio_input_backend.avail_lo = 0U;
+    virtio_input_backend.avail_hi = 0U;
+    virtio_input_backend.used_lo = 0U;
+    virtio_input_backend.used_hi = 0U;
+    virtio_input_backend.last_avail_idx = 0U;
+    virtio_input_backend.pending_head = 0U;
+    virtio_input_backend.pending_tail = 0U;
+    virtio_input_backend.dropped_events = 0U;
+    Xil_Out32(ZYNQ_CPU_VIRTIO_INPUT_CONTROL,
+              ZYNQ_CPU_VIRTIO_INPUT_CONTROL_NOTIFY_ACK);
+}
+
+static int virtio_input_backend_refresh_event_queue(virtio_input_backend_t *state)
+{
+    u32 queue_num = Xil_In32(ZYNQ_CPU_VIRTIO_INPUT_EVENT_QUEUE_NUM);
+    u32 queue_ready = Xil_In32(ZYNQ_CPU_VIRTIO_INPUT_EVENT_QUEUE_READY) & 1U;
+    u32 desc_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_INPUT_EVENT_DESC_LO);
+    u32 desc_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_INPUT_EVENT_DESC_HI);
+    u32 avail_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_INPUT_EVENT_AVAIL_LO);
+    u32 avail_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_INPUT_EVENT_AVAIL_HI);
+    u32 used_lo = virtio_ctrl_read64_lo(ZYNQ_CPU_VIRTIO_INPUT_EVENT_USED_LO);
+    u32 used_hi = virtio_ctrl_read64_hi(ZYNQ_CPU_VIRTIO_INPUT_EVENT_USED_HI);
+    int changed = (state->queue_num != queue_num ||
+                   state->queue_ready != queue_ready ||
+                   state->desc_lo != desc_lo ||
+                   state->desc_hi != desc_hi ||
+                   state->avail_lo != avail_lo ||
+                   state->avail_hi != avail_hi ||
+                   state->used_lo != used_lo ||
+                   state->used_hi != used_hi);
+
+    state->queue_num = queue_num;
+    state->queue_ready = queue_ready;
+    state->desc_lo = desc_lo;
+    state->desc_hi = desc_hi;
+    state->avail_lo = avail_lo;
+    state->avail_hi = avail_hi;
+    state->used_lo = used_lo;
+    state->used_hi = used_hi;
+    if (changed != 0) {
+        state->last_avail_idx = 0U;
+    }
+
+    return queue_ready != 0U &&
+           queue_num != 0U &&
+           queue_num <= ZYNQ_CPU_VIRTIO_INPUT_QUEUE_MAX;
+}
+
+static int virtio_input_read_event_desc(const virtio_input_backend_t *state,
+                                        u16 index,
+                                        virtio_blk_desc_t *desc)
+{
+    u32 ps_addr;
+
+    if ((u32)index >= state->queue_num ||
+        !virtio_blk_guest_addr_add(state->desc_lo,
+                                   state->desc_hi,
+                                   (u32)index * 16U,
+                                   16U,
+                                   &ps_addr)) {
+        return 0;
+    }
+
+    desc->addr_lo = ps_read_u32(ps_addr);
+    desc->addr_hi = ps_read_u32(ps_addr + 4U);
+    desc->len = ps_read_u32(ps_addr + 8U);
+    desc->flags = ps_read_u16(ps_addr + 12U);
+    desc->next = ps_read_u16(ps_addr + 14U);
+    return 1;
+}
+
+static void virtio_input_push_used(const virtio_input_backend_t *state,
+                                   u16 head,
+                                   u32 written_len)
+{
+    u32 used_ps;
+    u16 used_idx;
+    u32 elem;
+
+    if (!cpu_ddr64_to_ps_addr(state->used_lo, state->used_hi, 4U, &used_ps)) {
+        return;
+    }
+    used_idx = ps_read_u16(used_ps + 2U);
+    elem = used_ps + 4U + (((u32)used_idx % state->queue_num) * 8U);
+    ps_write_u32(elem, (u32)head);
+    ps_write_u32(elem + 4U, written_len);
+    ps_write_u16(used_ps + 2U, (u16)(used_idx + 1U));
+}
+
+static int virtio_input_pending_empty(const virtio_input_backend_t *state)
+{
+    return state->pending_head == state->pending_tail;
+}
+
+static int virtio_input_pending_full(const virtio_input_backend_t *state)
+{
+    return ((state->pending_tail + 1U) % ZYNQ_CPU_VIRTIO_INPUT_EVENT_RING) ==
+           state->pending_head;
+}
+
+static void virtio_input_enqueue_event(u16 type, u16 code, u32 value)
+{
+    virtio_input_event_t *event;
+
+    if (virtio_input_pending_full(&virtio_input_backend)) {
+        virtio_input_backend.dropped_events++;
+        return;
+    }
+
+    event = &virtio_input_backend.pending[virtio_input_backend.pending_tail];
+    event->type = type;
+    event->code = code;
+    event->value = value;
+    virtio_input_backend.pending_tail =
+        (virtio_input_backend.pending_tail + 1U) % ZYNQ_CPU_VIRTIO_INPUT_EVENT_RING;
+}
+
+static void virtio_input_enqueue_key(u16 code)
+{
+    virtio_input_enqueue_event(VIRTIO_INPUT_EV_KEY, code, 1U);
+    virtio_input_enqueue_event(VIRTIO_INPUT_EV_SYN, VIRTIO_INPUT_SYN_REPORT, 0U);
+    virtio_input_enqueue_event(VIRTIO_INPUT_EV_KEY, code, 0U);
+    virtio_input_enqueue_event(VIRTIO_INPUT_EV_SYN, VIRTIO_INPUT_SYN_REPORT, 0U);
+}
+
+static void virtio_input_queue_uart_char(u8 ch)
+{
+    if (ch == 'a' || ch == 'A') {
+        virtio_input_enqueue_key(VIRTIO_INPUT_KEY_A);
+    } else if (ch == 'b' || ch == 'B') {
+        virtio_input_enqueue_key(VIRTIO_INPUT_KEY_B);
+    } else if (ch == '\r' || ch == '\n') {
+        virtio_input_enqueue_key(VIRTIO_INPUT_KEY_ENTER);
+    }
+}
+
+static int virtio_input_write_event_to_desc(const virtio_blk_desc_t *desc,
+                                            const virtio_input_event_t *event)
+{
+    u32 ps_addr;
+
+    if ((desc->flags & VIRTQ_DESC_F_WRITE) == 0U ||
+        (desc->flags & VIRTQ_DESC_F_INDIRECT) != 0U ||
+        desc->len < 8U ||
+        !cpu_ddr64_to_ps_addr(desc->addr_lo, desc->addr_hi, 8U, &ps_addr)) {
+        return 0;
+    }
+
+    ps_write_u16(ps_addr, event->type);
+    ps_write_u16(ps_addr + 2U, event->code);
+    ps_write_u32(ps_addr + 4U, event->value);
+    return 1;
+}
+
+static void virtio_input_backend_poll(void)
+{
+    u32 status = Xil_In32(ZYNQ_CPU_VIRTIO_INPUT_STATUS);
+    u32 avail_ps;
+    u16 avail_idx;
+    u32 processed = 0U;
+    u32 control = 0U;
+
+    if ((status & ZYNQ_CPU_VIRTIO_INPUT_STATUS_NOTIFY_PENDING) != 0U) {
+        control |= ZYNQ_CPU_VIRTIO_INPUT_CONTROL_NOTIFY_ACK;
+    }
+
+    if (virtio_input_pending_empty(&virtio_input_backend)) {
+        if (control != 0U) {
+            Xil_Out32(ZYNQ_CPU_VIRTIO_INPUT_CONTROL, control);
+        }
+        return;
+    }
+
+    if (!virtio_input_backend_refresh_event_queue(&virtio_input_backend) ||
+        !cpu_ddr64_to_ps_addr(virtio_input_backend.avail_lo,
+                              virtio_input_backend.avail_hi,
+                              4U,
+                              &avail_ps)) {
+        if (control != 0U) {
+            Xil_Out32(ZYNQ_CPU_VIRTIO_INPUT_CONTROL, control);
+        }
+        return;
+    }
+
+    avail_idx = ps_read_u16(avail_ps + 2U);
+    while (!virtio_input_pending_empty(&virtio_input_backend) &&
+           virtio_input_backend.last_avail_idx != avail_idx &&
+           processed < virtio_input_backend.queue_num) {
+        virtio_blk_desc_t desc;
+        virtio_input_event_t *event;
+        u32 ring_ps;
+        u16 head;
+
+        if (!virtio_blk_guest_addr_add(virtio_input_backend.avail_lo,
+                                       virtio_input_backend.avail_hi,
+                                       4U + (((u32)virtio_input_backend.last_avail_idx %
+                                              virtio_input_backend.queue_num) * 2U),
+                                       2U,
+                                       &ring_ps)) {
+            break;
+        }
+
+        head = ps_read_u16(ring_ps);
+        if (!virtio_input_read_event_desc(&virtio_input_backend, head, &desc)) {
+            break;
+        }
+
+        event = &virtio_input_backend.pending[virtio_input_backend.pending_head];
+        if (!virtio_input_write_event_to_desc(&desc, event)) {
+            break;
+        }
+
+        virtio_input_backend.pending_head =
+            (virtio_input_backend.pending_head + 1U) % ZYNQ_CPU_VIRTIO_INPUT_EVENT_RING;
+        virtio_input_push_used(&virtio_input_backend, head, 8U);
+        virtio_input_backend.last_avail_idx++;
+        processed++;
+        avail_idx = ps_read_u16(avail_ps + 2U);
+    }
+
+    if (processed != 0U) {
+        control |= ZYNQ_CPU_VIRTIO_INPUT_CONTROL_RAISE_IRQ;
+    }
+    if (control != 0U) {
+        Xil_Out32(ZYNQ_CPU_VIRTIO_INPUT_CONTROL, control);
     }
 }
 
@@ -940,6 +1769,152 @@ static void print_linux_progress_probe(const char *tag, u32 *last_probe_dmem, u3
     *last_probe_imem = imem;
 }
 
+static const char *zx32_core_fsm_name(u32 fsm)
+{
+    switch (fsm) {
+    case 0U: return "reset";
+    case 1U: return "fetch";
+    case 2U: return "decode";
+    case 3U: return "exec";
+    case 13U: return "ptw_l1_req";
+    case 14U: return "ptw_l1_wait";
+    case 16U: return "ptw_l0_req";
+    case 17U: return "ptw_l0_wait";
+    case 19U: return "ptw_ad_req";
+    case 20U: return "muldiv";
+    case 24U: return "memory";
+    case 25U: return "writeback";
+    case 26U: return "wfi";
+    default: return "other";
+    }
+}
+
+static const char *zx32_core_priv_name(u32 priv)
+{
+    switch (priv) {
+    case 0U: return "U";
+    case 1U: return "S";
+    case 3U: return "M";
+    default: return "?";
+    }
+}
+
+static void print_linux_stall_probe(u32 seq,
+                                    XTime last_progress_time,
+                                    XTime now,
+                                    u32 console_total,
+                                    u32 *last_stall_pc,
+                                    u32 *last_stall_mcycle,
+                                    u32 *last_stall_minstret,
+                                    u32 *last_stall_wfi,
+                                    u32 *last_stall_trap,
+                                    u32 *last_stall_console)
+{
+    u64 quiet_ms = boot_elapsed_ms(last_progress_time, now);
+    u32 pc = Xil_In32(ZYNQ_CPU_DBG_PC);
+    u32 state = Xil_In32(ZYNQ_CPU_DBG_STATE);
+    u32 fsm = (state >> 9) & 0x1fU;
+    u32 priv = (state >> 14) & 0x3U;
+    u32 bus = Xil_In32(ZYNQ_CPU_DBG_BUS);
+    u32 mcycle_lo = Xil_In32(ZYNQ_CPU_DBG_MCYCLE_LO);
+    u32 mcycle_hi = Xil_In32(ZYNQ_CPU_DBG_MCYCLE_HI);
+    u32 minstret_lo = Xil_In32(ZYNQ_CPU_DBG_MINSTRET_LO);
+    u32 minstret_hi = Xil_In32(ZYNQ_CPU_DBG_MINSTRET_HI);
+    u32 wfi_lo = Xil_In32(ZYNQ_CPU_DBG_WFI_CYCLES_LO);
+    u32 wfi_hi = Xil_In32(ZYNQ_CPU_DBG_WFI_CYCLES_HI);
+    u32 trap_count = Xil_In32(CPU_LINUX_TRAP_COUNT);
+    u32 mcycle_delta = mcycle_lo - *last_stall_mcycle;
+    u32 minstret_delta = minstret_lo - *last_stall_minstret;
+    u32 wfi_delta = wfi_lo - *last_stall_wfi;
+    u32 trap_delta = trap_count - *last_stall_trap;
+    u32 console_delta = console_total - *last_stall_console;
+    int pc_changed = (pc != *last_stall_pc);
+    const char *activity;
+
+    if (minstret_delta != 0U || pc_changed) {
+        activity = "running";
+    } else if (wfi_delta != 0U || fsm == 26U) {
+        activity = "wfi";
+    } else if (mcycle_delta != 0U) {
+        activity = "waiting";
+    } else {
+        activity = "stopped";
+    }
+
+    xil_printf("[zx32-watchdog] no Linux console progress for %u.%03us seq=%u total=%u activity=%s\r\n",
+               (unsigned int)(quiet_ms / 1000ULL),
+               (unsigned int)(quiet_ms % 1000ULL),
+               (unsigned int)seq,
+               (unsigned int)console_total,
+               activity);
+    xil_printf("[zx32-watchdog] core pc=0x%08x%s satp=0x%08x fsm=%u(%s) priv=%s state=0x%08x\r\n",
+               (unsigned int)pc,
+               pc_changed ? " changed" : "",
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_SATP),
+               (unsigned int)fsm,
+               zx32_core_fsm_name(fsm),
+               zx32_core_priv_name(priv),
+               (unsigned int)state);
+    xil_printf("[zx32-watchdog] counters cycle=0x%08x%08x +%u instret=0x%08x%08x +%u wfi=0x%08x%08x +%u trap +%u console +%u\r\n",
+               (unsigned int)mcycle_hi,
+               (unsigned int)mcycle_lo,
+               (unsigned int)mcycle_delta,
+               (unsigned int)minstret_hi,
+               (unsigned int)minstret_lo,
+               (unsigned int)minstret_delta,
+               (unsigned int)wfi_hi,
+               (unsigned int)wfi_lo,
+               (unsigned int)wfi_delta,
+               (unsigned int)trap_delta,
+               (unsigned int)console_delta);
+    xil_printf("[zx32-watchdog] trap sepc=0x%08x scause=0x%08x stval=0x%08x stvec=0x%08x req=0x%08x->0x%08x\r\n",
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_SEPC),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_SCAUSE),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_STVAL),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_STVEC),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_REQ_VADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_REQ_PADDR));
+    xil_printf("[zx32-watchdog] bus raw=0x%08x ddr=0x%08x last_ddr=0x%08x last_axi=0x%08x imem=0x%08x dmem=0x%08x last_bus=0x%08x\r\n",
+               (unsigned int)bus,
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_DDR_ADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_LAST_DDR_ADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_LAST_AXI_ARADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_IMEM_ADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_DMEM_ADDR),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_LAST_DDR_STATE));
+    xil_printf("[zx32-watchdog] perf fetch_wait=%u dmem_wait=%u ddr_wait=%u ddr_busy=%u ireq=%u dreq=%u ihit/miss=%u/%u dhit/miss=%u/%u icw/dcw=%u/%u inval=%u iblk=%u\r\n",
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_FETCH_WAIT),
+               (unsigned int)Xil_In32(ZYNQ_CPU_DBG_DMEM_WAIT),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DDR_WAIT),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DDR_BUSY),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_IMEM_DDR_REQS),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DMEM_DDR_REQS),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_ICACHE_HITS),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_ICACHE_MISSES),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DCACHE_HITS),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DCACHE_MISSES),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_ICACHE_WAIT),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_DCACHE_WAIT),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_CACHE_INVALIDATES),
+               (unsigned int)Xil_In32(ZYNQ_CPU_PERF_ICACHE_BLOCKED));
+
+    hdmi_diag_prefix("\x1b[1;33m", "WATCH");
+    hdmi_console_puts("no console progress ");
+    hdmi_console_put_dec_u32((u32)(quiet_ms / 1000ULL));
+    hdmi_console_puts("s pc=");
+    hdmi_console_put_hex32(pc);
+    hdmi_console_puts(" ");
+    hdmi_console_puts(activity);
+    hdmi_console_putc('\n');
+
+    *last_stall_pc = pc;
+    *last_stall_mcycle = mcycle_lo;
+    *last_stall_minstret = minstret_lo;
+    *last_stall_wfi = wfi_lo;
+    *last_stall_trap = trap_count;
+    *last_stall_console = console_total;
+}
+
 static void print_linux_memset_probe(u32 *last_probe_dmem, u32 *last_probe_imem)
 {
     u32 pc = Xil_In32(ZYNQ_CPU_DBG_PC);
@@ -1122,6 +2097,7 @@ static void pump_linux_console_input(void)
         Xil_Out32(addr, word);
         tail++;
         Xil_Out32(CPU_LINUX_CONSOLE_IN_RING_TAIL, tail);
+        virtio_input_queue_uart_char(ch);
     }
 
     if (Xil_In32(CPU_LINUX_CONSOLE_IN_VALID) == 0U &&
@@ -1129,6 +2105,7 @@ static void pump_linux_console_input(void)
         u8 ch = XUartPs_RecvByte(STDIN_BASEADDRESS);
         Xil_Out32(CPU_LINUX_CONSOLE_IN_CHAR, (u32)ch);
         Xil_Out32(CPU_LINUX_CONSOLE_IN_VALID, 1U);
+        virtio_input_queue_uart_char(ch);
     }
 }
 
@@ -1207,7 +2184,16 @@ int main(void)
     u32 last_probe_imem = 0U;
     u32 report_count = 0U;
     u32 idle_report_count = 0U;
+    u32 stall_report_seq = 0U;
+    u32 last_stall_pc = 0xffffffffU;
+    u32 last_stall_mcycle = 0U;
+    u32 last_stall_minstret = 0U;
+    u32 last_stall_wfi = 0U;
+    u32 last_stall_trap = 0U;
+    u32 last_stall_console = 0U;
     u32 sysmon_sample_seq = 0U;
+    XTime last_console_progress_time = 0;
+    XTime last_stall_report_time = 0;
     XTime last_sysmon_time = 0;
     int linux_console_started = 0;
     int userspace_idle_seen = 0;
@@ -1245,6 +2231,13 @@ restart_linux_boot:
     last_probe_imem = 0U;
     report_count = 0U;
     idle_report_count = 0U;
+    stall_report_seq = 0U;
+    last_stall_pc = 0xffffffffU;
+    last_stall_mcycle = 0U;
+    last_stall_minstret = 0U;
+    last_stall_wfi = 0U;
+    last_stall_trap = 0U;
+    last_stall_console = 0U;
     linux_console_started = 0;
     userspace_idle_seen = 0;
     welcome_seen = 0;
@@ -1252,6 +2245,8 @@ restart_linux_boot:
 
     Xil_Out32(ZYNQ_CPU_CPU_CTRL, 1U);
     XTime_GetTime(&boot_start_time);
+    last_console_progress_time = boot_start_time;
+    last_stall_report_time = boot_start_time;
     last_sysmon_time = boot_start_time;
     publish_zynq_temperature(&sysmon_sample_seq);
 
@@ -1318,7 +2313,8 @@ restart_linux_boot:
     hdmi_console_put_dec_u32(CPU_LINUX_CONSOLE_RING_BYTES);
     hdmi_console_puts("B\n");
 
-    if (ps_code0 != ZYNQ_CPU_LINUX_IMAGE_CODE0 ||
+    if ((ps_code0 != ZYNQ_CPU_LINUX_IMAGE_CODE0 &&
+         ps_code0 != ZYNQ_CPU_LINUX_IMAGE_CODE0_ALT) ||
         ps_text_lo != ZYNQ_CPU_LINUX_IMAGE_TEXT_LO ||
         ps_text_hi != 0U ||
         ps_magic0 != ZYNQ_CPU_LINUX_IMAGE_MAGIC0 ||
@@ -1376,12 +2372,21 @@ restart_linux_boot:
     Xil_Out32(CPU_LINUX_RESET_REASON, 0U);
     Xil_Out32(CPU_LINUX_RESET_MAGIC, 0U);
     clear_linux_sbi_counters();
+    virtio_blk_backend_reset();
+    virtio_input_backend_reset();
     Xil_Out32(CPU_MAIL_STATUS, 0U);
 
+#if defined(ZYNQ_CPU_RV64_BOOT)
+    rc = load_zx32_elf_into_imem(zx64_linux_boot_firmware_elf,
+                                 zx64_linux_boot_firmware_elf_size,
+                                 &firmware_words,
+                                 &firmware_entry);
+#else
     rc = load_zx32_elf_into_imem(zx32_linux_boot_firmware_elf,
                                  zx32_linux_boot_firmware_elf_size,
                                  &firmware_words,
                                  &firmware_entry);
+#endif
     if (rc != 0) {
         xil_printf("Linux boot fw ELF rc: %d\r\n", rc);
         hdmi_diag_line("\x1b[1;31m", "FAIL", "Linux boot firmware ELF load failed");
@@ -1390,11 +2395,19 @@ restart_linux_boot:
     }
 
     Xil_Out32(ZYNQ_CPU_RESET_VECTOR, firmware_entry);
+#if defined(ZYNQ_CPU_RV64_BOOT)
+    for (u32 i = 0U; i < zx64_linux_boot_firmware_program_words; i++) {
+        if (Xil_In32(ZYNQ_CPU_IMEM_BASE + i * 4U) != zx64_linux_boot_firmware_program[i]) {
+            verify_errors++;
+        }
+    }
+#else
     for (u32 i = 0U; i < (sizeof(zx32_linux_boot_firmware_program) / sizeof(zx32_linux_boot_firmware_program[0])); i++) {
         if (Xil_In32(ZYNQ_CPU_IMEM_BASE + i * 4U) != zx32_linux_boot_firmware_program[i]) {
             verify_errors++;
         }
     }
+#endif
 
     xil_printf("FW words: %u\r\n", (unsigned int)firmware_words);
     xil_printf("FW entry: 0x%08x\r\n", (unsigned int)firmware_entry);
@@ -1438,9 +2451,26 @@ restart_linux_boot:
         int monitor_idle = userspace_idle_seen != 0 || login_seen != 0;
 
         pump_linux_console_input();
+        virtio_blk_backend_poll();
+        virtio_input_backend_poll();
 
         {
+            u32 before_console_total = last_console_total;
             u32 console_events = print_linux_console_mirror(&last_console_total, &linux_console_started);
+
+            if (last_console_total != before_console_total) {
+                XTime now;
+
+                XTime_GetTime(&now);
+                last_console_progress_time = now;
+                last_stall_report_time = now;
+                last_stall_pc = pc;
+                last_stall_mcycle = Xil_In32(ZYNQ_CPU_DBG_MCYCLE_LO);
+                last_stall_minstret = Xil_In32(ZYNQ_CPU_DBG_MINSTRET_LO);
+                last_stall_wfi = Xil_In32(ZYNQ_CPU_DBG_WFI_CYCLES_LO);
+                last_stall_trap = trap_count;
+                last_stall_console = last_console_total;
+            }
 
             if ((console_events & 2U) != 0U && welcome_seen == 0) {
                 XTime now;
@@ -1590,6 +2620,22 @@ restart_linux_boot:
             XTime now;
 
             XTime_GetTime(&now);
+            if (login_seen == 0 &&
+                boot_elapsed_ms(last_console_progress_time, now) >= ZYNQ_BOOT_STALL_REPORT_MS &&
+                boot_elapsed_ms(last_stall_report_time, now) >= ZYNQ_BOOT_STALL_REPORT_MS) {
+                stall_report_seq++;
+                print_linux_stall_probe(stall_report_seq,
+                                        last_console_progress_time,
+                                        now,
+                                        last_console_total,
+                                        &last_stall_pc,
+                                        &last_stall_mcycle,
+                                        &last_stall_minstret,
+                                        &last_stall_wfi,
+                                        &last_stall_trap,
+                                        &last_stall_console);
+                last_stall_report_time = now;
+            }
             if (boot_elapsed_ms(last_sysmon_time, now) >= ZYNQ_SYSMON_POLL_MS) {
                 publish_zynq_temperature(&sysmon_sample_seq);
                 last_sysmon_time = now;
@@ -1599,10 +2645,14 @@ restart_linux_boot:
         if (monitor_idle) {
             usleep(ZYNQ_BOOT_MONITOR_IDLE_SLEEP_US);
             pump_linux_console_input();
+            virtio_blk_backend_poll();
+            virtio_input_backend_poll();
         } else if (report_count < boot_watchdog_reports) {
             for (volatile u32 delay = 0U; delay < ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS; delay++) {
                 if ((delay & 0x3ffU) == 0U) {
                     pump_linux_console_input();
+                    virtio_blk_backend_poll();
+                    virtio_input_backend_poll();
                 }
             }
             report_count++;
@@ -1625,6 +2675,8 @@ restart_linux_boot:
             for (volatile u32 delay = 0U; delay < ZYNQ_BOOT_MONITOR_ACTIVE_DELAY_LOOPS; delay++) {
                 if ((delay & 0x3ffU) == 0U) {
                     pump_linux_console_input();
+                    virtio_blk_backend_poll();
+                    virtio_input_backend_poll();
                 }
             }
         }

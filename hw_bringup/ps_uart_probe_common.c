@@ -24,6 +24,11 @@ static u32 read_u32_le(const u8 *ptr)
            ((u32)ptr[3] << 24);
 }
 
+static u64 read_u64_le(const u8 *ptr)
+{
+    return (u64)read_u32_le(ptr) | ((u64)read_u32_le(&ptr[4]) << 32);
+}
+
 int load_zx32_elf_into_imem(const u8 *elf, u32 elf_size, u32 *loaded_words_out, u32 *entry_out)
 {
     enum {
@@ -31,22 +36,33 @@ int load_zx32_elf_into_imem(const u8 *elf, u32 elf_size, u32 *loaded_words_out, 
         EI_DATA = 5,
         EI_VERSION = 6,
     };
-    const u32 elf_header_size = 52U;
-    const u32 phdr_size = 32U;
+    const u32 elf32_header_size = 52U;
+    const u32 elf64_header_size = 64U;
+    const u32 phdr32_size = 32U;
+    const u32 phdr64_size = 56U;
+    u32 elf_header_size;
+    u32 phdr_size;
+    u32 elf_class;
     u32 entry;
     u32 phoff;
     u16 phentsize;
     u16 phnum;
     u32 loaded_words = 0U;
 
-    if (elf_size < elf_header_size) {
+    if (elf_size < elf32_header_size) {
         return -1;
     }
     if (elf[0] != 0x7FU || elf[1] != 'E' || elf[2] != 'L' || elf[3] != 'F') {
         return -2;
     }
-    if (elf[EI_CLASS] != 1U || elf[EI_DATA] != 1U || elf[EI_VERSION] != 1U) {
+    elf_class = elf[EI_CLASS];
+    if ((elf_class != 1U && elf_class != 2U) || elf[EI_DATA] != 1U || elf[EI_VERSION] != 1U) {
         return -3;
+    }
+    elf_header_size = (elf_class == 1U) ? elf32_header_size : elf64_header_size;
+    phdr_size = (elf_class == 1U) ? phdr32_size : phdr64_size;
+    if (elf_size < elf_header_size) {
+        return -1;
     }
     if (read_u16_le(&elf[16]) != 2U) {
         return -4;
@@ -54,13 +70,29 @@ int load_zx32_elf_into_imem(const u8 *elf, u32 elf_size, u32 *loaded_words_out, 
     if (read_u16_le(&elf[18]) != 243U) {
         return -5;
     }
-    if (read_u32_le(&elf[28]) != elf_header_size) {
-        return -6;
+    if (elf_class == 1U) {
+        if (read_u32_le(&elf[28]) != elf_header_size) {
+            return -6;
+        }
+        entry = read_u32_le(&elf[24]);
+        phoff = read_u32_le(&elf[28]);
+        phentsize = read_u16_le(&elf[42]);
+        phnum = read_u16_le(&elf[44]);
+    } else {
+        u64 entry64 = read_u64_le(&elf[24]);
+        u64 phoff64 = read_u64_le(&elf[32]);
+
+        if (read_u16_le(&elf[52]) != elf_header_size) {
+            return -6;
+        }
+        if ((entry64 >> 32) != 0U || (phoff64 >> 32) != 0U) {
+            return -12;
+        }
+        entry = (u32)entry64;
+        phoff = (u32)phoff64;
+        phentsize = read_u16_le(&elf[54]);
+        phnum = read_u16_le(&elf[56]);
     }
-    entry = read_u32_le(&elf[24]);
-    phoff = read_u32_le(&elf[28]);
-    phentsize = read_u16_le(&elf[42]);
-    phnum = read_u16_le(&elf[44]);
     if (phentsize != phdr_size) {
         return -7;
     }
@@ -71,10 +103,31 @@ int load_zx32_elf_into_imem(const u8 *elf, u32 elf_size, u32 *loaded_words_out, 
     for (u16 i = 0U; i < phnum; i++) {
         const u8 *ph = &elf[phoff + ((u32)i * (u32)phentsize)];
         u32 p_type = read_u32_le(&ph[0]);
-        u32 p_offset = read_u32_le(&ph[4]);
-        u32 p_paddr = read_u32_le(&ph[12]);
-        u32 p_filesz = read_u32_le(&ph[16]);
-        u32 p_memsz = read_u32_le(&ph[20]);
+        u32 p_offset;
+        u32 p_paddr;
+        u32 p_filesz;
+        u32 p_memsz;
+
+        if (elf_class == 1U) {
+            p_offset = read_u32_le(&ph[4]);
+            p_paddr = read_u32_le(&ph[12]);
+            p_filesz = read_u32_le(&ph[16]);
+            p_memsz = read_u32_le(&ph[20]);
+        } else {
+            u64 p_offset64 = read_u64_le(&ph[8]);
+            u64 p_paddr64 = read_u64_le(&ph[24]);
+            u64 p_filesz64 = read_u64_le(&ph[32]);
+            u64 p_memsz64 = read_u64_le(&ph[40]);
+
+            if ((p_offset64 >> 32) != 0U || (p_paddr64 >> 32) != 0U ||
+                (p_filesz64 >> 32) != 0U || (p_memsz64 >> 32) != 0U) {
+                return -13;
+            }
+            p_offset = (u32)p_offset64;
+            p_paddr = (u32)p_paddr64;
+            p_filesz = (u32)p_filesz64;
+            p_memsz = (u32)p_memsz64;
+        }
 
         if (p_type != 1U) {
             continue;
