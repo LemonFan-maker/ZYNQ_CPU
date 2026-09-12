@@ -130,7 +130,7 @@ module axi4_master_bridge #(
             S_WAIT_AW_W: begin
                 M_AXI_AWVALID = ~aw_done_q;
                 M_AXI_WVALID  = ~w_done_q;
-                if (aw_done_q && w_done_q) begin
+                if ((aw_done_q || M_AXI_AWREADY) && (w_done_q || M_AXI_WREADY)) begin
                     next_state = S_WAIT_B;
                 end
             end

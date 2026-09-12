@@ -6,5 +6,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-exec zsh -lc "source /home/orionisli/.zshrc >/dev/null 2>&1 && vi25 && xsct $(printf '%q' "$1")"
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_path="$(readlink -f "$1")"
 
+exec zsh -lc "cd $(printf '%q' "$repo_dir") && source /home/orionisli/.zshrc >/dev/null 2>&1 && vi25 && xsct $(printf '%q' "$script_path")"
