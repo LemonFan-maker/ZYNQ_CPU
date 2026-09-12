@@ -36,12 +36,16 @@
 #define GPU_CMD_DONE     0x38u
 #define GPU_SRC_ADDR     0x4cu
 #define GPU_SRC_STRIDE   0x50u
+#define GPU_SRC_SIZE     0x54u
+#define GPU_ALPHA_CTRL   0x58u
 
 #define GPU_OP_CLEAR     1u
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
 #define GPU_OP_BLIT      4u
 #define GPU_OP_COLOR_KEY_BLIT 5u
+#define GPU_OP_SCALE_BLIT 6u
+#define GPU_OP_ALPHA_BLIT 7u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)

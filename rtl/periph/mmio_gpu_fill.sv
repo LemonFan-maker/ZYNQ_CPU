@@ -22,6 +22,8 @@ module mmio_gpu_fill (
     localparam logic [3:0] OP_DRAW_LINE = 4'h3;
     localparam logic [3:0] OP_BLIT = 4'h4;
     localparam logic [3:0] OP_COLOR_KEY_BLIT = 4'h5;
+    localparam logic [3:0] OP_SCALE_BLIT = 4'h6;
+    localparam logic [3:0] OP_ALPHA_BLIT = 4'h7;
     localparam logic [23:0] DDR_WAIT_TIMEOUT = 24'hff_ffff;
     localparam int CMD_FIFO_DEPTH = 4;
     localparam logic [2:0] CMD_FIFO_DEPTH_U = 3'd4;
@@ -38,6 +40,10 @@ module mmio_gpu_fill (
     logic [15:0] rect_h_q;
     logic [31:0] src_addr_q;
     logic [31:0] src_stride_q;
+    logic [15:0] src_width_q;
+    logic [15:0] src_height_q;
+    logic [31:0] alpha_ctrl_q;
+    logic [7:0]  active_alpha_q;
     logic [3:0]  op_q;
     logic        busy_q;
     logic        done_q;
@@ -54,7 +60,16 @@ module mmio_gpu_fill (
     logic        addr_init_q;
     logic [15:0] addr_init_rows_q;
     logic        blit_write_phase_q;
+    logic        alpha_dst_read_phase_q;
     logic [31:0] blit_pixel_q;
+    logic [15:0] active_draw_w_q;
+    logic [15:0] active_draw_h_q;
+    logic [15:0] active_src_width_q;
+    logic [15:0] active_src_height_q;
+    logic [31:0] scale_x_accum_q;
+    logic [31:0] scale_y_accum_q;
+    logic        scale_x_advance_q;
+    logic        scale_y_advance_q;
     logic [23:0] ddr_wait_q;
     logic [31:0] pixel_count_q;
     logic [31:0] last_ctrl_q;
@@ -71,6 +86,9 @@ module mmio_gpu_fill (
     logic [15:0] fifo_h_q [0:CMD_FIFO_DEPTH-1];
     logic [31:0] fifo_src_addr_q [0:CMD_FIFO_DEPTH-1];
     logic [31:0] fifo_src_stride_q [0:CMD_FIFO_DEPTH-1];
+    logic [15:0] fifo_src_width_q [0:CMD_FIFO_DEPTH-1];
+    logic [15:0] fifo_src_height_q [0:CMD_FIFO_DEPTH-1];
+    logic [7:0]  fifo_alpha_q [0:CMD_FIFO_DEPTH-1];
     logic [2:0]  fifo_wr_q;
     logic [2:0]  fifo_rd_q;
     logic [2:0]  fifo_count_q;
@@ -99,10 +117,13 @@ module mmio_gpu_fill (
     logic        op_is_draw_line;
     logic        op_is_blit;
     logic        op_is_color_key_blit;
+    logic        op_is_scale_blit;
+    logic        op_is_alpha_blit;
     logic        unsupported_op;
     logic        invalid_rect_start;
     logic        invalid_line_start;
     logic        invalid_blit_start;
+    logic        invalid_scale_start;
     logic [31:0] start_addr_base;
     logic        start_req;
     logic        start_accept_req;
@@ -131,16 +152,22 @@ module mmio_gpu_fill (
     logic [15:0] launch_h_q;
     logic [31:0] launch_src_addr_q;
     logic [31:0] launch_src_stride_q;
+    logic [15:0] launch_src_width_q;
+    logic [15:0] launch_src_height_q;
+    logic [7:0]  launch_alpha_q;
     logic [31:0] launch_ctrl_q;
     logic        launch_is_clear;
     logic        launch_is_fill_rect;
     logic        launch_is_draw_line;
     logic        launch_is_blit;
     logic        launch_is_color_key_blit;
+    logic        launch_is_scale_blit;
+    logic        launch_is_alpha_blit;
     logic        launch_unsupported;
     logic        launch_invalid_rect;
     logic        launch_invalid_line;
     logic        launch_invalid_blit;
+    logic        launch_invalid_scale;
     logic        launch_invalid;
     logic [15:0] launch_start_x;
     logic [15:0] launch_start_y;
@@ -154,7 +181,16 @@ module mmio_gpu_fill (
     logic [31:0] launch_src_addr_base;
     logic        engine_busy;
     logic        op_blit_like;
+    logic        op_scale_blit;
+    logic        op_alpha_blit;
     logic        color_key_skip_write;
+    logic        scale_advancing;
+    logic [31:0] scale_x_accum_sum;
+    logic [31:0] scale_y_accum_sum;
+    logic [31:0] scale_x_accum_after_sub;
+    logic [31:0] scale_y_accum_after_sub;
+    logic [31:0] active_draw_w_ext;
+    logic [31:0] active_draw_h_ext;
 
     assign ready = valid && !(capture_start_req && !start_wait_q);
     assign start_req = valid && we && addr[7:2] == 6'h00 && wstrb[0] && wdata[0];
@@ -169,8 +205,11 @@ module mmio_gpu_fill (
     assign op_is_draw_line = wdata[7:4] == OP_DRAW_LINE;
     assign op_is_blit = wdata[7:4] == OP_BLIT;
     assign op_is_color_key_blit = wdata[7:4] == OP_COLOR_KEY_BLIT;
+    assign op_is_scale_blit = wdata[7:4] == OP_SCALE_BLIT;
+    assign op_is_alpha_blit = wdata[7:4] == OP_ALPHA_BLIT;
     assign unsupported_op = !op_is_clear && !op_is_fill_rect && !op_is_draw_line &&
-                            !op_is_blit && !op_is_color_key_blit;
+                            !op_is_blit && !op_is_color_key_blit &&
+                            !op_is_scale_blit && !op_is_alpha_blit;
     assign start_x = op_is_clear ? 16'd0 : rect_x_q;
     assign start_y = op_is_clear ? 16'd0 : rect_y_q;
     assign draw_w = op_is_clear ? fb_width_q : rect_w_q;
@@ -186,19 +225,26 @@ module mmio_gpu_fill (
                                 src_stride_q == 32'd0 ||
                                 src_addr_q[1:0] != 2'b00 ||
                                 start_addr_base[1:0] != 2'b00;
+    assign invalid_scale_start = invalid_blit_start ||
+                                 src_width_q == 16'd0 ||
+                                 src_height_q == 16'd0;
     assign invalid_start = engine_busy ||
                            unsupported_op ||
                            fb_addr_q[31:30] != 2'b10 ||
                            fb_stride_q == 32'd0 ||
                            (op_is_draw_line ? invalid_line_start :
-                            (op_is_blit || op_is_color_key_blit) ? (invalid_rect_start || invalid_blit_start) :
+                            op_is_scale_blit ? (invalid_rect_start || invalid_scale_start) :
+                            (op_is_blit || op_is_color_key_blit || op_is_alpha_blit) ?
+                            (invalid_rect_start || invalid_blit_start) :
                             invalid_rect_start);
     assign invalid_submit = fifo_count_q == CMD_FIFO_DEPTH_U ||
                             unsupported_op ||
                             fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (op_is_draw_line ? invalid_line_start :
-                             (op_is_blit || op_is_color_key_blit) ? (invalid_rect_start || invalid_blit_start) :
+                             op_is_scale_blit ? (invalid_rect_start || invalid_scale_start) :
+                             (op_is_blit || op_is_color_key_blit || op_is_alpha_blit) ?
+                             (invalid_rect_start || invalid_blit_start) :
                              invalid_rect_start);
 
     assign capture_start_req = start_accept_req && !invalid_start;
@@ -216,9 +262,12 @@ module mmio_gpu_fill (
     assign launch_is_draw_line = launch_op == OP_DRAW_LINE;
     assign launch_is_blit = launch_op == OP_BLIT;
     assign launch_is_color_key_blit = launch_op == OP_COLOR_KEY_BLIT;
+    assign launch_is_scale_blit = launch_op == OP_SCALE_BLIT;
+    assign launch_is_alpha_blit = launch_op == OP_ALPHA_BLIT;
     assign launch_unsupported = !launch_is_clear && !launch_is_fill_rect &&
                                 !launch_is_draw_line && !launch_is_blit &&
-                                !launch_is_color_key_blit;
+                                !launch_is_color_key_blit && !launch_is_scale_blit &&
+                                !launch_is_alpha_blit;
     assign launch_start_x = launch_is_clear ? 16'd0 : launch_x;
     assign launch_start_y = launch_is_clear ? 16'd0 : launch_y;
     assign launch_draw_w = launch_is_clear ? fb_width_q : launch_w;
@@ -234,24 +283,40 @@ module mmio_gpu_fill (
                                  launch_src_stride_q == 32'd0 ||
                                  launch_src_addr_q[1:0] != 2'b00 ||
                                  launch_start_addr_base[1:0] != 2'b00;
+    assign launch_invalid_scale = launch_invalid_blit ||
+                                  launch_src_width_q == 16'd0 ||
+                                  launch_src_height_q == 16'd0;
     assign launch_invalid = launch_unsupported ||
                             fb_addr_q[31:30] != 2'b10 ||
                             fb_stride_q == 32'd0 ||
                             (launch_is_draw_line ? launch_invalid_line :
-                             (launch_is_blit || launch_is_color_key_blit) ?
+                             launch_is_scale_blit ?
+                             (launch_invalid_rect || launch_invalid_scale) :
+                             (launch_is_blit || launch_is_color_key_blit || launch_is_alpha_blit) ?
                              (launch_invalid_rect || launch_invalid_blit) :
                              launch_invalid_rect);
 
     assign start_addr_base = fb_addr_q + {14'd0, start_x, 2'b00};
     assign launch_start_addr_base = fb_addr_q + {14'd0, launch_start_x, 2'b00};
     assign launch_src_addr_base = launch_src_addr_q;
-    assign op_blit_like = op_q == OP_BLIT || op_q == OP_COLOR_KEY_BLIT;
+    assign op_blit_like = op_q == OP_BLIT || op_q == OP_COLOR_KEY_BLIT ||
+                          op_q == OP_SCALE_BLIT || op_q == OP_ALPHA_BLIT;
+    assign op_scale_blit = op_q == OP_SCALE_BLIT;
+    assign op_alpha_blit = op_q == OP_ALPHA_BLIT;
     assign color_key_skip_write = busy_q && op_q == OP_COLOR_KEY_BLIT &&
                                   blit_write_phase_q && blit_pixel_q == active_color_q;
-    assign ddr_valid = busy_q && !addr_init_q && !color_key_skip_write;
-    assign ddr_we = !(op_blit_like && !blit_write_phase_q);
+    assign scale_advancing = busy_q && op_scale_blit && (scale_x_advance_q || scale_y_advance_q);
+    assign ddr_valid = busy_q && !addr_init_q && !scale_advancing && !color_key_skip_write;
+    assign ddr_we = op_alpha_blit ? (blit_write_phase_q && !alpha_dst_read_phase_q) :
+                    !(op_blit_like && !blit_write_phase_q);
     assign ddr_addr = (op_blit_like && !blit_write_phase_q) ? cur_src_addr_q : cur_addr_q;
     assign ddr_wdata = op_blit_like ? blit_pixel_q : active_color_q;
+    assign active_draw_w_ext = {16'd0, active_draw_w_q};
+    assign active_draw_h_ext = {16'd0, active_draw_h_q};
+    assign scale_x_accum_sum = scale_x_accum_q + {16'd0, active_src_width_q};
+    assign scale_y_accum_sum = scale_y_accum_q + {16'd0, active_src_height_q};
+    assign scale_x_accum_after_sub = scale_x_accum_q - active_draw_w_ext;
+    assign scale_y_accum_after_sub = scale_y_accum_q - active_draw_h_ext;
     assign line_dx_s = $signed({4'd0, line_dx_q});
     assign line_dy_s = $signed({4'd0, line_dy_q});
     assign line_err2 = line_err_q <<< 1;
@@ -285,6 +350,8 @@ module mmio_gpu_fill (
             6'h12: rdata = perf_write_count_q;
             6'h13: rdata = src_addr_q;
             6'h14: rdata = src_stride_q;
+            6'h15: rdata = {src_height_q, src_width_q};
+            6'h16: rdata = alpha_ctrl_q;
             default: rdata = 32'd0;
         endcase
     end
@@ -303,6 +370,10 @@ module mmio_gpu_fill (
             rect_h_q <= 16'd0;
             src_addr_q <= 32'd0;
             src_stride_q <= 32'd0;
+            src_width_q <= 16'd0;
+            src_height_q <= 16'd0;
+            alpha_ctrl_q <= 32'h0000_00ff;
+            active_alpha_q <= 8'hff;
             op_q <= 4'd0;
             busy_q <= 1'b0;
             done_q <= 1'b0;
@@ -319,7 +390,16 @@ module mmio_gpu_fill (
             addr_init_q <= 1'b0;
             addr_init_rows_q <= 16'd0;
             blit_write_phase_q <= 1'b0;
+            alpha_dst_read_phase_q <= 1'b0;
             blit_pixel_q <= 32'd0;
+            active_draw_w_q <= 16'd0;
+            active_draw_h_q <= 16'd0;
+            active_src_width_q <= 16'd0;
+            active_src_height_q <= 16'd0;
+            scale_x_accum_q <= 32'd0;
+            scale_y_accum_q <= 32'd0;
+            scale_x_advance_q <= 1'b0;
+            scale_y_advance_q <= 1'b0;
             ddr_wait_q <= 24'd0;
             pixel_count_q <= 32'd0;
             last_ctrl_q <= 32'd0;
@@ -339,6 +419,9 @@ module mmio_gpu_fill (
             launch_h_q <= 16'd0;
             launch_src_addr_q <= 32'd0;
             launch_src_stride_q <= 32'd0;
+            launch_src_width_q <= 16'd0;
+            launch_src_height_q <= 16'd0;
+            launch_alpha_q <= 8'hff;
             launch_ctrl_q <= 32'd0;
             fifo_wr_q <= 3'd0;
             fifo_rd_q <= 3'd0;
@@ -357,6 +440,9 @@ module mmio_gpu_fill (
                 fifo_h_q[i] <= 16'd0;
                 fifo_src_addr_q[i] <= 32'd0;
                 fifo_src_stride_q[i] <= 32'd0;
+                fifo_src_width_q[i] <= 16'd0;
+                fifo_src_height_q[i] <= 16'd0;
+                fifo_alpha_q[i] <= 8'hff;
             end
         end else if (soft_reset_req) begin
             busy_q <= 1'b0;
@@ -374,7 +460,17 @@ module mmio_gpu_fill (
             addr_init_q <= 1'b0;
             addr_init_rows_q <= 16'd0;
             blit_write_phase_q <= 1'b0;
+            alpha_dst_read_phase_q <= 1'b0;
             blit_pixel_q <= 32'd0;
+            active_draw_w_q <= 16'd0;
+            active_draw_h_q <= 16'd0;
+            active_src_width_q <= 16'd0;
+            active_src_height_q <= 16'd0;
+            active_alpha_q <= 8'hff;
+            scale_x_accum_q <= 32'd0;
+            scale_y_accum_q <= 32'd0;
+            scale_x_advance_q <= 1'b0;
+            scale_y_advance_q <= 1'b0;
             ddr_wait_q <= 24'd0;
             pixel_count_q <= 32'd0;
             last_ctrl_q <= wdata;
@@ -394,6 +490,9 @@ module mmio_gpu_fill (
             launch_h_q <= 16'd0;
             launch_src_addr_q <= 32'd0;
             launch_src_stride_q <= 32'd0;
+            launch_src_width_q <= 16'd0;
+            launch_src_height_q <= 16'd0;
+            launch_alpha_q <= 8'hff;
             launch_ctrl_q <= 32'd0;
             fifo_wr_q <= 3'd0;
             fifo_rd_q <= 3'd0;
@@ -446,6 +545,13 @@ module mmio_gpu_fill (
                     end
                     6'h13: src_addr_q <= merge_word(src_addr_q, wdata, wstrb);
                     6'h14: src_stride_q <= merge_word(src_stride_q, wdata, wstrb);
+                    6'h15: begin
+                        if (wstrb[0]) src_width_q[7:0] <= wdata[7:0];
+                        if (wstrb[1]) src_width_q[15:8] <= wdata[15:8];
+                        if (wstrb[2]) src_height_q[7:0] <= wdata[23:16];
+                        if (wstrb[3]) src_height_q[15:8] <= wdata[31:24];
+                    end
+                    6'h16: alpha_ctrl_q <= merge_word(alpha_ctrl_q, wdata, wstrb);
                     default: begin
                     end
                 endcase
@@ -470,6 +576,9 @@ module mmio_gpu_fill (
                     fifo_h_q[fifo_wr_q[1:0]] <= rect_h_q;
                     fifo_src_addr_q[fifo_wr_q[1:0]] <= src_addr_q;
                     fifo_src_stride_q[fifo_wr_q[1:0]] <= src_stride_q;
+                    fifo_src_width_q[fifo_wr_q[1:0]] <= src_width_q;
+                    fifo_src_height_q[fifo_wr_q[1:0]] <= src_height_q;
+                    fifo_alpha_q[fifo_wr_q[1:0]] <= alpha_ctrl_q[7:0];
                     fifo_wr_q <= fifo_wr_q == 3'd3 ? 3'd0 : (fifo_wr_q + 3'd1);
                     fifo_count_q <= fifo_count_q + 3'd1;
                 end
@@ -487,6 +596,9 @@ module mmio_gpu_fill (
                 launch_h_q <= rect_h_q;
                 launch_src_addr_q <= src_addr_q;
                 launch_src_stride_q <= src_stride_q;
+                launch_src_width_q <= src_width_q;
+                launch_src_height_q <= src_height_q;
+                launch_alpha_q <= alpha_ctrl_q[7:0];
                 launch_ctrl_q <= wdata;
             end else if (capture_fifo_req) begin
                 launch_pending_q <= 1'b1;
@@ -499,6 +611,9 @@ module mmio_gpu_fill (
                 launch_h_q <= fifo_h_q[fifo_rd_q[1:0]];
                 launch_src_addr_q <= fifo_src_addr_q[fifo_rd_q[1:0]];
                 launch_src_stride_q <= fifo_src_stride_q[fifo_rd_q[1:0]];
+                launch_src_width_q <= fifo_src_width_q[fifo_rd_q[1:0]];
+                launch_src_height_q <= fifo_src_height_q[fifo_rd_q[1:0]];
+                launch_alpha_q <= fifo_alpha_q[fifo_rd_q[1:0]];
                 launch_ctrl_q <= {24'd0, fifo_op_q[fifo_rd_q[1:0]], 3'd0, 1'b1};
                 fifo_rd_q <= fifo_rd_q == 3'd3 ? 3'd0 : (fifo_rd_q + 3'd1);
                 fifo_count_q <= fifo_count_q - 3'd1;
@@ -529,10 +644,20 @@ module mmio_gpu_fill (
                     cur_src_addr_q <= launch_src_addr_base;
                     row_start_addr_q <= launch_start_addr_base;
                     src_row_start_addr_q <= launch_src_addr_base;
+                    active_draw_w_q <= launch_draw_w;
+                    active_draw_h_q <= launch_draw_h;
+                    active_src_width_q <= launch_src_width_q;
+                    active_src_height_q <= launch_src_height_q;
+                    active_alpha_q <= launch_alpha_q;
                     addr_init_q <= launch_start_y != 16'd0;
                     addr_init_rows_q <= launch_start_y;
                     blit_write_phase_q <= 1'b0;
+                    alpha_dst_read_phase_q <= 1'b0;
                     blit_pixel_q <= 32'd0;
+                    scale_x_accum_q <= 32'd0;
+                    scale_y_accum_q <= 32'd0;
+                    scale_x_advance_q <= 1'b0;
+                    scale_y_advance_q <= 1'b0;
                     line_dx_q <= launch_line_dx;
                     line_dy_q <= launch_line_dy;
                     line_sx_inc_q <= launch_line_sx_inc;
@@ -546,15 +671,43 @@ module mmio_gpu_fill (
                 if (addr_init_rows_q == 16'd1) begin
                     addr_init_q <= 1'b0;
                 end
+            end else if (busy_q && op_scale_blit && scale_y_advance_q) begin
+                ddr_wait_q <= 24'd0;
+                if (scale_y_accum_q >= active_draw_h_ext) begin
+                    scale_y_accum_q <= scale_y_accum_after_sub;
+                    src_row_start_addr_q <= src_row_start_addr_q + src_stride_q;
+                    cur_src_addr_q <= src_row_start_addr_q + src_stride_q;
+                    scale_y_advance_q <= scale_y_accum_after_sub >= active_draw_h_ext;
+                end else begin
+                    scale_y_advance_q <= 1'b0;
+                    cur_src_addr_q <= src_row_start_addr_q;
+                end
+            end else if (busy_q && op_scale_blit && scale_x_advance_q) begin
+                ddr_wait_q <= 24'd0;
+                if (scale_x_accum_q >= active_draw_w_ext) begin
+                    scale_x_accum_q <= scale_x_accum_after_sub;
+                    cur_src_addr_q <= cur_src_addr_q + 32'd4;
+                    scale_x_advance_q <= scale_x_accum_after_sub >= active_draw_w_ext;
+                end else begin
+                    scale_x_advance_q <= 1'b0;
+                end
             end else if (busy_q && (ddr_ready || color_key_skip_write)) begin
                 ddr_wait_q <= 24'd0;
-                if (op_blit_like && !blit_write_phase_q) begin
+                if (op_alpha_blit && !blit_write_phase_q) begin
+                    blit_pixel_q <= ddr_rdata;
+                    blit_write_phase_q <= 1'b1;
+                    alpha_dst_read_phase_q <= 1'b1;
+                end else if (op_alpha_blit && alpha_dst_read_phase_q) begin
+                    blit_pixel_q <= blend_xrgb8888(blit_pixel_q, ddr_rdata, active_alpha_q);
+                    alpha_dst_read_phase_q <= 1'b0;
+                end else if (op_blit_like && !blit_write_phase_q) begin
                     blit_pixel_q <= ddr_rdata;
                     blit_write_phase_q <= 1'b1;
                 end else begin
                     pixel_count_q <= pixel_count_q + 32'd1;
                     if (op_blit_like) begin
                         blit_write_phase_q <= 1'b0;
+                        alpha_dst_read_phase_q <= 1'b0;
                     end
                     if (op_q == OP_DRAW_LINE) begin
                         if (cur_x_q == end_x_q && cur_y_q == end_y_q) begin
@@ -583,7 +736,13 @@ module mmio_gpu_fill (
                             cur_y_q <= cur_y_q + 16'd1;
                             row_start_addr_q <= row_start_addr_q + fb_stride_q;
                             cur_addr_q <= row_start_addr_q + fb_stride_q;
-                            if (op_blit_like) begin
+                            if (op_scale_blit) begin
+                                scale_x_accum_q <= 32'd0;
+                                scale_x_advance_q <= 1'b0;
+                                scale_y_accum_q <= scale_y_accum_sum;
+                                scale_y_advance_q <= scale_y_accum_sum >= active_draw_h_ext;
+                                cur_src_addr_q <= src_row_start_addr_q;
+                            end else if (op_blit_like) begin
                                 src_row_start_addr_q <= src_row_start_addr_q + src_stride_q;
                                 cur_src_addr_q <= src_row_start_addr_q + src_stride_q;
                             end
@@ -591,7 +750,10 @@ module mmio_gpu_fill (
                     end else begin
                         cur_x_q <= cur_x_q + 16'd1;
                         cur_addr_q <= cur_addr_q + 32'd4;
-                        if (op_blit_like) begin
+                        if (op_scale_blit) begin
+                            scale_x_accum_q <= scale_x_accum_sum;
+                            scale_x_advance_q <= scale_x_accum_sum >= active_draw_w_ext;
+                        end else if (op_blit_like) begin
                             cur_src_addr_q <= cur_src_addr_q + 32'd4;
                         end
                     end
@@ -620,5 +782,41 @@ module mmio_gpu_fill (
             end
         end
         merge_word = merged;
+    endfunction
+
+    function automatic logic [7:0] blend_channel(
+        input logic [7:0] src,
+        input logic [7:0] dst,
+        input logic [7:0] alpha
+    );
+        logic [15:0] src_ext;
+        logic [15:0] dst_ext;
+        logic [15:0] alpha_ext;
+        logic [15:0] inv_alpha_ext;
+        logic [17:0] weighted;
+        logic [17:0] biased;
+        logic [17:0] div255;
+
+        src_ext = {8'd0, src};
+        dst_ext = {8'd0, dst};
+        alpha_ext = {8'd0, alpha};
+        inv_alpha_ext = 16'd255 - alpha_ext;
+        weighted = (src_ext * alpha_ext) + (dst_ext * inv_alpha_ext);
+        biased = weighted + 18'd128;
+        div255 = biased + {10'd0, biased[17:8]};
+        blend_channel = div255[15:8];
+    endfunction
+
+    function automatic logic [31:0] blend_xrgb8888(
+        input logic [31:0] src,
+        input logic [31:0] dst,
+        input logic [7:0] alpha
+    );
+        blend_xrgb8888 = {
+            8'hff,
+            blend_channel(src[23:16], dst[23:16], alpha),
+            blend_channel(src[15:8], dst[15:8], alpha),
+            blend_channel(src[7:0], dst[7:0], alpha)
+        };
     endfunction
 endmodule
