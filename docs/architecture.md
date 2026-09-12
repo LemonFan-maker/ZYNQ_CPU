@@ -2,6 +2,13 @@
 
 This document describes the current RTL architecture, not the original plan.
 
+The repository now carries two CPU/SoC families on the `riscv64gc` development branch:
+
+- **ZX32** (`rtl/core`, `rtl/soc/zx32_soc.sv`): the board-proven RV32 Linux platform described in most of this document.
+- **ZX64** (`rtl/core64`, `rtl/soc/zx64_soc.sv`): the in-development RV64GC platform with a 5-stage pipeline, PLIC, and virtio-mmio devices. See [ZX64 RV64 Platform](#zx64-rv64-platform-in-development) below.
+
+The Vivado bring-up build selects between them through `ZYNQ_CPU_SOC=rv32|rv64` in `vivado/build_hw_bringup.tcl`.
+
 ## System Shape
 
 ```text
@@ -93,11 +100,12 @@ This is enough for the current Linux and Buildroot path, but it is still a simpl
 
 `rtl/periph/mmio_gpu_fill.sv` implements the first rendering coprocessor milestone. It is a fixed-function MMIO device, not a programmable GPU.
 
-The v0 renderer can:
+The current renderer can:
 
 - clear a 32-bit-per-pixel framebuffer
 - fill an axis-aligned rectangle
 - draw a Bresenham-style line
+- blit, color-key blit, nearest-neighbor scale-blit, and fixed-point alpha-blit a source rectangle from DDR into the framebuffer
 - queue up to four commands in a small FIFO
 - write pixels to the PS DDR window through the existing SoC DDR bridge
 - expose busy/done/error/FIFO/debug counters through MMIO polling
@@ -108,7 +116,7 @@ The board and simulator DTS files expose a 1 GiB CPU DDR window and reserve `0xb
 
 | Offset | Register | Description |
 | ---: | --- | --- |
-| `0x00` | control | write bit 0 to start; bits `[7:4]` opcode: `1=clear`, `2=fill_rect`, `3=draw_line`; bit 31 soft-resets renderer state |
+| `0x00` | control | write bit 0 to start; bits `[7:4]` opcode: `1=clear`, `2=fill_rect`, `3=draw_line`, `4=blit`, `5=color_key_blit`, `6=scale_blit`, `7=alpha_blit`; bit 31 soft-resets renderer state |
 | `0x04` | status | bit 0 busy, bit 1 done, bit 2 error; write one to bits 1/2 to clear sticky status |
 | `0x08` | framebuffer address | CPU-visible DDR framebuffer base, expected in the `0x8000_0000..0xbfff_ffff` DDR window |
 | `0x0c` | framebuffer stride | bytes per framebuffer row |
@@ -123,6 +131,10 @@ The board and simulator DTS files expose a 1 GiB CPU DDR window and reserve `0xb
 | `0x40` | busy cycles | cycles with an active direct/FIFO command or pending launch |
 | `0x44` | DDR stall cycles | cycles where the renderer has a pixel write ready but DDR is not ready |
 | `0x48` | write count | total accepted framebuffer pixel writes |
+| `0x4c` | source address | CPU-visible DDR source-pixel base for the blit family |
+| `0x50` | source stride | bytes per source row for the blit family |
+| `0x54` | source size | `{src_h[15:0], src_w[15:0]}` for scale-blit source sampling |
+| `0x58` | alpha control | bits `[7:0]` constant source alpha for alpha-blit (`dst*(255-a)+src*a` per channel); color-key-blit instead skips source pixels equal to the `color` register key value |
 
 The renderer only issues DDR writes when the CPU demand path and D-cache prefetch path are idle. GPU writes invalidate matching I-cache and D-cache lines so CPU readback does not reuse stale cached data.
 
@@ -240,3 +252,77 @@ Remaining architecture work is mostly about turning the bring-up contract into a
 - expand MMU, interrupt, AMO, and memory-ordering tests around Linux behavior
 - decide which custom devices should be visible to Linux
 - document cache/uncached memory ordering before performance work
+
+## ZX64 RV64 Platform (In Development)
+
+The `riscv64gc` branch adds a second CPU/SoC family targeted at running mainline RV64 Linux with a real block-device rootfs instead of an embedded initramfs only.
+
+### Shape
+
+```text
+PS launcher (ps_linux_boot, ZYNQ_CPU_RV64_BOOT build)
+  -> AXI-Lite apertures: IMEM load, scratch mailbox, virtio backend windows
+  -> zx64_soc
+       -> zx64_core5 (5-stage RV64GC) or zx64_core (single-cycle)
+       -> simple_ram64 boot IMEM
+       -> MMIO UART, timer, scratchpad (ZX32-compatible offsets)
+       -> mmio_plic_min at 0x0c00_0000 (2 sources)
+       -> mmio_virtio_blk_regs at 0x1006_0000 (PS-backed /dev/vda)
+       -> mmio_virtio_input_regs at 0x1009_0000
+       -> AXI4 master bridge to PS DDR with I-cache/D-cache line refills
+```
+
+### Cores
+
+`rtl/core64/zx64_core5.sv` is the primary development core: an in-order 5-stage pipeline (IF/ID/EX/MEM/WB registers) implementing `rv64gc_zicsr_zifencei` with:
+
+- 64-bit ALU/register path, 32-bit instruction fetch window (compressed-instruction aware, `if_id_instr_len`)
+- RV64M via `zx64_muldiv_unit`, RV64A doubleword atomics with LR/SC reservation
+- RV64F/D floating point through `fregfile64` and an `ENABLE_FPU` parameter; the Vivado script defaults it to 1, but a full-FPU `zx64_core5` over-utilizes the XC7Z020 LUTs (~77.5k vs 53.2k sites) — see the FPU Resource Blocker in `docs/synthesis_status.md`
+- M/S/U privilege, S-mode CSR substrate, Sv39 page walking
+
+`rtl/core64/zx64_core.sv` is the older single-cycle RV64 core kept as a reference model for the pipeline tests.
+
+### SoC Memory Map
+
+CPU-visible addresses (from `rtl/soc/zx64_soc.sv`):
+
+| Region | Base | Purpose |
+| --- | ---: | --- |
+| Boot IMEM | `0x0000_0000` | 32 KiB `simple_ram64` (4096 BRAM words), PS-loaded M-mode firmware |
+| PLIC | `0x0c00_0000` | `mmio_plic_min`, `riscv,ndev = 2` |
+| UART | `0x1000_0000` | ZX32-compatible MMIO UART |
+| Timer | `0x1001_0000` | `mtime`/`mtimecmp`, SBI TIME bridge unchanged |
+| Virtio-blk MMIO | `0x1006_0000` | virtio 1.0 legacy-free MMIO transport, device ID 2, vendor `0x5a323032` |
+| Virtio-input MMIO | `0x1009_0000` | same transport, input device |
+| Scratch RX/TX | `0x2000_0000` | SBI console rings + mailbox (same contract as ZX32) |
+| PS DDR window | `0x8000_0000` | 1 GiB translated window, cached read refills |
+
+### PS-Backed Virtio Backend
+
+Linux sees `virtio,mmio` devices, but the ring processing lives on the PS side. The PL exposes queue descriptors/avail/used addresses, notify counts, and capacity through the bring-up-registers control block (`ZYNQ_CPU_VIRTIO_BLK_*` / `ZYNQ_CPU_VIRTIO_INPUT_*` in `hw_bringup/ps_uart_probe.h`); `ps_linux_boot.c` polls notify events and services the virtqueues against PS DDR.
+
+- **virtio-blk**: a 64 MiB ext4 image is loaded to PS `0x0800_0000` (CPU `0x8800_0000`) before release; a metadata block with magic `0x5A363442` at PS `0x07ff_f000` carries capacity. Linux mounts it read-write as `root=/dev/vda`.
+- **virtio-input**: PS forwards host keyboard events on the PS UART as virtio input events (node currently `okay` in the effective DTB for experimental use).
+
+### RV64 Linux Boot Contract
+
+```text
+PS launcher
+  -> RV64 firmware (linux_boot_firmware.rv64.S) into IMEM
+  -> Linux Image at CPU 0x8020_0000 / PS 0x0020_0000 (text offset 0x200000)
+  -> DTB at CPU 0x8200_0000 / PS 0x0200_0000
+  -> virtio-blk ext4 rootfs image at PS 0x0800_0000
+  -> S-mode entry a0=hartid, a1=DTB, satp=0
+  -> bootargs: earlycon=sbi console=hvc0 root=/dev/vda rw rootwait lpj=10000 loglevel=7
+```
+
+The DTB source is `linux/zx64.dts` (base: memory 1 GiB @ `0x8000_0000`, reserved boot-artifact backup `0x8410_0000`+19 MiB, VRAM `0xbc00_0000`+64 MiB, disabled UART/timer/DataMover/GPU/display stubs). `scripts/prepare_zx64_linux_boot_artifacts.sh` generates `build/linux-rv64/zx64.effective.dts` which enables PLIC, both virtio devices, the virtio-blk image reserved node, and the `simple-framebuffer` at `0xbc00_0000` (1920x1080, stride 7680, `x8r8g8b8`, currently the only display contract; scanout RTL is still the ZX32 bring-up block).
+
+`scripts/check_zx64_linux_boot_chain.sh` asserts the whole contract (SHA256s, addresses, non-overlap, MISA vs `riscv,isa`, rootfs mode) and records `build/linux-rv64/boot_artifacts.env`.
+
+### Status Boundary
+
+- Synthesized and timing-clean in the Vivado RV64 flow only with `ZYNQ_CPU_RV64_ENABLE_FPU=0` (`build/vivado_hw_rv64`, see `docs/synthesis_status.md`); the FPU-enabled RV64GC build does not fit the XC7Z020 and is an open blocker. Iverilog regression coverage exists for core, SoC, SBI, Linux handoff, PLIC, and virtio register models (`./scripts/run_iverilog_tests.sh soc64-5stage-linux` etc.).
+- Board boot of the RV64 chain is **not yet recorded** in `docs/hardware_uart_test.md`; treat RV64-on-hardware as pending, and the RV32 path above as the only board-proven Linux ABI.
+- No RV64 Python simulator model exists yet; `tools/zx32sim/` remains RV32-only.

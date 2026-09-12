@@ -1,8 +1,8 @@
-# ZX32 ISA Notes
+# ISA Notes
 
-ZX32 is the local name for this project's RV32-class core and its small custom bring-up extension set. The direction remains RISC-V compatible enough to reuse upstream software where possible.
+The project carries two core families. **ZX32** is the local name for the RV32-class core and its small custom bring-up extension set (the rest of this document's RV32 sections). **ZX64** is the RV64GC family under `rtl/core64/` described in [ZX64 ISA](#zx64-rv64-isa). Both remain RISC-V compatible enough to reuse upstream software.
 
-## Current ISA Substrate
+## ZX32 ISA Substrate
 
 Implemented or intentionally scaffolded in the current core/tooling:
 
@@ -131,3 +131,23 @@ Still needed before trusting a Linux boot:
 - MMU permission/accessed/dirty behavior validation against Linux expectations
 - atomics under real memory traffic
 - final SBI ABI coverage, not only smoke tests
+
+## ZX64 RV64 ISA
+
+`rtl/core64/zx64_core5.sv` (5-stage, primary) and `rtl/core64/zx64_core.sv` (single-cycle, reference) implement:
+
+```text
+rv64gc_zicsr_zifencei   (misa 0x8000_0000_0004_112d with ENABLE_FPU)
+rv64imac_zicsr_zifencei (misa 0x8000_0000_0004_1105 with ENABLE_FPU=0)
+```
+
+- full 64-bit integer path: LD/SD doubleword loads/stores, `addiw`, shifted immw ops, 64-bit branches/jumps
+- RV64M through the shared `zx64_muldiv_unit` (`mulh/mulhsu/mulhu/div/divu/rem/remu` doubleword forms)
+- RV64A atomics including doubleword `lr.d/sc.d` and `amo*.d` with reservation tracking
+- RV64F/RV64D when `ENABLE_FPU=1`: `fregfile64`, `fflags/frm/fcsr`, FP load/store, arithmetic, convert/compare/move — gated by `mstatus.FS`
+- M/S/U privilege, medeleg/mideleg routing, native 64-bit `time`/`cycle`/`instret` counters (RV64 has no split `*h` CSRs)
+- **Sv39** page translation (`satp.MODE = 8`), honoring `mstatus.SUM/MXR`; `MPRV` is not implemented
+
+There are no ZX32 custom opcodes in the core64 family; the bring-up DataMover instructions remain RV32-only.
+
+Validation: `tb/tb_zx64_core.sv`, `tb/tb_zx64_core_compressed.sv`, `tb/tb_zx64_core5.sv` (ISA, C-extension, pipeline hazard/forwarding smokes), plus the SoC-level SBI/Sv39/Linux-handoff testbenches listed in `docs/toolchain.md`. No formal RISC-V compliance run exists yet for either family.

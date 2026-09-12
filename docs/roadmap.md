@@ -1,8 +1,13 @@
 # Roadmap
 
-The project goal is a custom PL CPU that can run a useful riscv32 Linux environment. 
+The project goal is a custom PL CPU that can run a useful Linux environment.
 
-The first useful Linux milestone is now complete: the board boots a mainline RV32 kernel into an embedded Buildroot/BusyBox initramfs, starts the standard init scripts, reaches `buildroot login:`, and accepts interactive `hvc0` input.
+The RV32 line reached that goal first: the board boots a mainline RV32 kernel into an embedded Buildroot/BusyBox initramfs, starts the standard init scripts, reaches `buildroot login:`, and accepts interactive `hvc0` input.
+
+The active work now happens on the `riscv64gc` branch and has two tracks:
+
+1. **ZX32 (RV32)** — stabilize the board-proven Buildroot userspace, HDMI/VRAM display path, and the MMIO GPU.
+2. **ZX64 (RV64GC)** — a new 5-stage RV64GC SoC with PLIC and PS-backed virtio-blk/virtio-input, with a complete mainline RV64 Linux (v7.1.3) boot chain using an ext4 rootfs on `/dev/vda`. So far this is validated in Icarus simulation, Vivado implementation (timing met with the FPU disabled; the full-FPU build does not fit the part), and scripted boot-contract checks; the first board boot has not been run yet.
 
 ## Completed Bring-Up Milestones
 
@@ -45,15 +50,45 @@ These are already represented in code, tests, or board logs:
 - Linux userspace monitoring tools include GPU utilization/VRAM reporting and a PS-published Zynq XADC temperature readout
 - host-side image conversion, XSCT/JTAG VRAM download, and PPM dump helpers exist for offline framebuffer preview
 
+
+## Completed ZX64 (RV64) Milestones
+
+Represented in RTL, testbenches, scripts, or the RV64 Vivado build (`build/vivado_hw_rv64`):
+
+- RV64 single-cycle core (`zx64_core`) and 5-stage pipeline core (`zx64_core5`): rv64gc_zicsr_zifencei, Sv39, M/S/U, RV64A doubleword atomics, FPU with `ENABLE_FPU`, compressed fetch
+- `zx64_soc`/`zx64_soc_bd`: 32 KiB `simple_ram64` IMEM, ZX32-compatible UART/timer/scratch, `mmio_plic_min` (2 sources), `mmio_virtio_blk_regs`, `mmio_virtio_input_regs`, cached AXI4 DDR bridge
+- Icarus regressions: `core64`, `core64-5stage`, `soc64*` (host/ddr/sv39/sbi/real-sbi/linux handoff), `plic`, `virtio-blk-regs`, `virtio-input-regs`, `zx64-fw`, `zx64-boot-chain`
+- RV64 boot artifacts: `linux/zx64.dts` + effective-DTS generator (`virtio-blk` + `simple-framebuffer` + PLIC enabled), `zx64_rv64.config` kernel fragment, mainline Linux v7.1.3 RV64 Image (6.5 MB), Buildroot-zx64 rootfs cpio, 64 MiB ext4 rootfs image
+- RV64 S-mode boot firmware (`linux_boot_firmware.rv64.S`) with the same scratch-ring SBI console/timer contract as RV32
+- RV64 Vivado bring-up build timing-clean at 75 MHz with `ZYNQ_CPU_RV64_ENABLE_FPU=0`; the FPU-enabled RV64GC build over-utilizes the XC7Z020 and is an open blocker (`docs/synthesis_status.md`); `scripts/check_zx64_vivado_bitstream.sh` and `check_zx64_linux_boot_chain.sh` gate the contract
+- ArchLinux-readiness analysis recorded in `scripts/check_zx64_archlinux_readiness.sh` (standard-kernel contract checks)
+
 ## Current Development Stage
 
 The active stage is:
 
 ```text
+run the ZX64 RV64 Linux boot chain on the board
+```
+
+Success signature for that run:
+
+```text
+Linux version 7.1.3 ... riscv64
+...
+VFS: Mounted root (ext4 filesystem) on device 254:0
+...
+Welcome to Buildroot
+buildroot login:
+```
+
+The parallel standing stage for RV32 remains:
+
+```text
 stabilize the board-proven Buildroot userspace and platform ABI
 ```
 
-The immediate success signature to preserve is:
+The RV32 regression baseline that must keep reproducing (same Image/DTB/firmware layout) is:
 
 ```text
 Saving 2048 bits of non-creditable seed for next boot
@@ -66,11 +101,12 @@ Welcome to Buildroot
 buildroot login:
 ```
 
-Do not treat later Linux regressions as userspace or kernel bugs until this signature still reproduces with the same Image/DTB/firmware layout.
+Do not treat later RV32 Linux regressions as userspace or kernel bugs until this signature still reproduces.
+
 
 ## Current Linux Artifacts
 
-Source-of-truth files:
+Source-of-truth files (RV32):
 
 - `docs/linux_bringup.md`
 - `docs/linux_boot_layout.md`
@@ -86,15 +122,45 @@ Source-of-truth files:
 - `scripts/run_zx32sim_linux_early.sh`
 - `scripts/run_zx32sim_smokes.sh`
 
+Source-of-truth files (RV64 / ZX64):
+
+- `rtl/core64/`, `rtl/soc/zx64_soc.sv`, `rtl/soc/zx64_soc_bd.v`, `rtl/periph/mmio_plic_min.sv`, `rtl/periph/mmio_virtio_blk_regs.sv`, `rtl/periph/mmio_virtio_input_regs.sv`, `rtl/periph/simple_ram64.sv`
+- `linux/zx64.dts`, `linux/zx64_rv64.config`
+- `hw_bringup/programs/linux_boot_firmware.rv64.S`
+- `hw_bringup/download_zynq_cpu_rv64_linux_boot.xsbl`
+- `scripts/prepare_mainline_rv64_linux.sh`, `scripts/prepare_zx64_linux_boot_artifacts.sh`, `scripts/build_ps_linux_boot_rv64.sh`
+- `scripts/check_zx64_linux_boot_chain.sh`, `scripts/check_zx64_linux_boot_firmware.sh`, `scripts/check_zx64_standard_kernel_contract.sh`, `scripts/check_zx64_vivado_bitstream.sh`, `scripts/check_zx64_archlinux_readiness.sh`
+- `vivado/build_hw_bringup.tcl` (`ZYNQ_CPU_SOC=rv32|rv64`)
+- `tb/tb_zx64_*.sv`, `tb/tb_mmio_plic_min.sv`, `tb/tb_mmio_virtio_*_regs.sv`
+
 Generated artifacts:
 
-- `linux/kernel/`
-- `build/linux-mainline-rv32/`
-- `build/buildroot-zx32/`
-- `build/linux/`
+- `linux/kernel/`, `linux/kernel-v7.1.3/`
+- `build/linux-mainline-rv32/`, `build/buildroot-zx32/`, `build/linux/`
+- `build/linux-mainline-rv64/`, `build/buildroot-zx64/`, `build/zx64-buildroot/`, `build/linux-rv64/`
+- `build/vivado_hw/`, `build/vivado_hw_rv64/`
 - `hw_bringup/build/`
 
 These generated paths are ignored and should not become source-of-truth.
+
+## Next Milestone: RV64 Board Boot
+
+Goal: make the ZX64 RV64 Linux boot chain real on hardware, not only in simulation.
+
+Required work:
+
+```text
+Linux version 7.1.3 ... riscv64
+VFS: Mounted root (ext4 filesystem) on device 254:0
+Welcome to Buildroot
+buildroot login:
+```
+
+- build the RV64 bitstream with the default build dir (`ZYNQ_CPU_SOC=rv64`) and program the board
+- run `download_zynq_cpu_rv64_linux_boot.xsbl` and capture the full PS UART log into `docs/hardware_uart_test.md`
+- confirm virtio-blk enumeration, ext4 mount, and `hvc0` login over the shared scratch console
+- re-verify timer behavior on the 5-stage core (`lpj=10000` still sane, SBI TIME events firing)
+- if any step fails, fall back to the simulator-side scripts (`tb_zx64_soc_real_sbi.sv`, `tb_zx64_soc_linux_handoff.sv`) before touching userspace
 
 ## Next Milestone: Stable Buildroot Regression
 
@@ -208,7 +274,7 @@ Required work:
 - keep the reserved `0xbc00_0000` framebuffer smoke region until a real allocator contract is needed
 - keep the GPU path polling-based until the interrupt contract is needed
 - rerun Vivado implementation before treating the renderer as board-ready
-- add blit/scale-blit/alpha blend before triangle rasterization
+- blit, color-key blit, scale-blit, and alpha-blit are implemented; the next renderer steps are triangle rasterization and a VRAM allocator contract
 
 ## Later Performance Work
 
@@ -216,11 +282,11 @@ Performance is intentionally not the first priority.
 
 After Linux reaches a reliable small userspace, consider:
 
-- simulator basic-block execution or a Rust/C/C++ hot core while retaining the Python model as reference
+- an RV64 Python/Rust functional model mirroring `zx32_core5` (currently RV64 has no simulator)
 - broader cache policy work beyond the current small direct-mapped I-cache/D-cache
 - burst-capable DDR bridge
 - prefetch for instruction fetch from DDR
 - larger local memories
-- pipelining the core
+- (pipelining is done in the RV64 line: `zx64_core5`; the RV32 core stays multi-cycle)
 
 Do not start with these unless a correctness milestone is blocked by current performance.

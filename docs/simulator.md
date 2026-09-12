@@ -2,6 +2,8 @@
 
 This document describes the Python functional simulator under `tools/zx32sim/`.
 
+Scope note: this model is RV32/ZX32-only. There is no RV64 (ZX64) functional simulator yet; the RV64 platform is validated through Icarus SoC testbenches (`./scripts/run_iverilog_tests.sh soc64-5stage-linux`, `zx64-boot-chain`, …) and `scripts/check_zx64_linux_boot_chain.sh` instead.
+
 The simulator is not a replacement for RTL or board verification. It is a fast software bring-up target for the CPU-visible contract: ISA behavior, traps, Sv32 translation, SBI firmware behavior, Linux boot, the scratch console bridge, and simple block-device experiments.
 
 ## What It Can Run

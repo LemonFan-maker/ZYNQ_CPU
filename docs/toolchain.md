@@ -18,23 +18,33 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 
 | Script | Purpose |
 | --- | --- |
-| `scripts/run_all_tests.sh` | run Python tool tests and all Icarus RTL tests |
-| `scripts/run_iverilog_tests.sh` | run `core`, `irqctrl`, `scratchpad`, `gpu`, `soc`, `soc-sv32`, or `all` Icarus tests |
+| `scripts/run_all_tests.sh` | run Python tool tests and all Icarus RTL tests (RV32 + RV64) |
+| `scripts/run_iverilog_tests.sh` | run one Icarus target: `core`, `core64`, `core64-5stage`, `soc64*` (mmio/host/bd-host/ddr/sv39/sbi/real-sbi/linux), `zx64-fw`, `zx64-boot-chain`, `zx64-standard-kernel`, `zx64-vivado-bitstream`, `irqctrl`, `plic`, `virtio-blk-regs`, `virtio-input-regs`, `scratchpad`, `gpu`, `video`, `soc`, `soc-sv32`, or `all` |
 | `scripts/run_zx32_toolchain_tests.sh` | run assembler and ELF unit tests |
 | `scripts/run_zx32sim_smokes.sh` | run ZX32 functional simulator smoke tests |
 | `scripts/run_zx32sim_linux_early.sh` | boot the Linux Image/DTB/SBI firmware in the functional simulator |
 | `scripts/run_zx32sim_xsbl.sh` | run a board-style XSBL download flow through the functional simulator |
-| `scripts/build_zx32_programs.sh` | assemble bring-up programs, build ELF files, generate `zx32_programs.h` |
+| `scripts/build_zx32_programs.sh` | assemble bring-up programs (RV32 + the RV64 SBI firmware), build ELF files, generate `zx32_programs.h` |
 | `scripts/build_ps_uart_probe.sh` | build the ARM-side PS UART probe ELF |
+| `scripts/build_ps_linux_boot_rv64.sh` | rebuild `ps_linux_boot.elf` with `-DZYNQ_CPU_RV64_BOOT` (RV64 launcher + virtio-blk/input service) |
 | `scripts/build_zx32_membench.sh` | build the Linux userspace DDR/cache benchmark into the Buildroot overlay |
 | `scripts/build_zx32_gpu_smoke.sh` | build the Linux userspace GPU framebuffer smoke test into the Buildroot overlay |
 | `scripts/build_zx32_image_viewer.sh` | build the Linux userspace framebuffer image viewer into the Buildroot overlay |
 | `scripts/download_zx32_vram_file.sh` | download a raw framebuffer image to the reserved VRAM window through XSCT/JTAG |
 | `scripts/dump_zx32_vram_ppm.sh` | read the reserved VRAM window through XSCT/JTAG and convert it to PPM |
 | `scripts/prepare_mainline_linux.sh` | prepare the local mainline Linux source tree under `linux/kernel/` |
-| `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as Linux initramfs |
+| `scripts/build_zx32_busybox_rootfs.sh` | build the Buildroot BusyBox rootfs used as RV32 Linux initramfs |
 | `scripts/build_mainline_rv32_linux.sh` | build the RV32 Linux Image with the project config fragment |
-| `scripts/prepare_linux_boot_artifacts.sh` | build the DTB and validate the Linux Image/DTB layout |
+| `scripts/prepare_linux_boot_artifacts.sh` | build the RV32 DTB and validate the Linux Image/DTB layout |
+| `scripts/prepare_mainline_rv64_linux.sh` | fetch/build mainline Linux v7.1.3 as the RV64 Image (`build/linux-mainline-rv64/`) |
+| `scripts/build_zx64_busybox_rootfs.sh` | build the Buildroot-zx64 RV64 rootfs cpio |
+| `scripts/build_zx64_virtio_rootfs_ext4.sh` | build the 64 MiB ext4 rootfs image served by PS-backed virtio-blk |
+| `scripts/prepare_zx64_linux_boot_artifacts.sh` | build `zx64.dtb` + effective DTS and write `build/linux-rv64/boot_artifacts.env` |
+| `scripts/check_zx64_linux_boot_chain.sh` | RV64 boot-contract gate: hashes, addresses, MISA vs `riscv,isa`, rootfs mode |
+| `scripts/check_zx64_linux_boot_firmware.sh` | assemble/verify the RV64 SBI boot firmware ELF |
+| `scripts/check_zx64_standard_kernel_contract.sh` | check the kernel build against the standard RV64 platform contract |
+| `scripts/check_zx64_vivado_bitstream.sh` | build/verify the RV64 bitstream (`build/vivado_hw_rv64`), print LUT/timing summary |
+| `scripts/check_zx64_archlinux_readiness.sh` | assess ArchLinux-style distro readiness against the RV64 platform |
 | `scripts/run_vivado.sh` | Vivado 2025.2 wrapper |
 | `scripts/run_xsct.sh` | XSCT 2025.2 wrapper |
 | `scripts/serial_monitor.sh` | open `picocom` on a board serial port |
@@ -46,9 +56,10 @@ The wrappers start `zsh`, source `/home/orionisli/.zshrc`, call `vi25`, then inv
 | `tools/zx32asm.py` | minimal ZX32/RV32 assembler for bring-up programs |
 | `tools/zx32elf.py` | pack ZX32 assembly into minimal ELF images |
 | `tools/bin2c.py` | convert ELF binaries into C arrays |
+| `tools/bin2c_words.py` | emit 64-bit word arrays for RV64 IMEM images |
 | `tools/test_zx32asm.py` | assembler unit tests |
 | `tools/test_zx32elf.py` | ELF packer unit tests |
-| `tools/zx32sim/` | Python functional simulator for RV32 ISA, traps, Sv32, SBI, Linux, and simple devices |
+| `tools/zx32sim/` | Python functional simulator for RV32 ISA, traps, Sv32, SBI, Linux, and simple devices (no RV64 model yet) |
 | `tools/test_zx32sim.py` | simulator unit tests |
 | `tools/convert_image_xrgb.py` | convert host images to little-endian XRGB8888 raw framebuffer pixels |
 | `tools/xrgb_to_ppm.py` | convert little-endian XRGB8888 raw framebuffer pixels to PPM |
@@ -69,6 +80,9 @@ Run one RTL simulation target:
 ./scripts/run_iverilog_tests.sh scratchpad
 ./scripts/run_iverilog_tests.sh gpu
 ./scripts/run_iverilog_tests.sh soc
+./scripts/run_iverilog_tests.sh core64-5stage
+./scripts/run_iverilog_tests.sh soc64-5stage-linux
+./scripts/run_iverilog_tests.sh zx64-boot-chain
 ```
 
 Run only Python toolchain tests:
@@ -185,11 +199,23 @@ Prepare and build the current Linux boot artifacts:
 ./scripts/build_mainline_rv32_linux.sh
 ./scripts/prepare_linux_boot_artifacts.sh
 ```
-
 `scripts/build_mainline_rv32_linux.sh` embeds
 `build/buildroot-zx32/images/rootfs.cpio` by default. Set
 `LINUX_INITRAMFS_SOURCE` to point at another initramfs, or set
 `ZX32_INITRAMFS=0` to build without an embedded initramfs.
+
+Prepare and build the RV64 (ZX64) Linux boot artifacts:
+
+```sh
+./scripts/prepare_mainline_rv64_linux.sh
+./scripts/build_zx64_busybox_rootfs.sh
+./scripts/build_zx64_virtio_rootfs_ext4.sh
+./scripts/prepare_zx64_linux_boot_artifacts.sh
+./scripts/check_zx64_linux_boot_chain.sh
+./scripts/build_ps_linux_boot_rv64.sh
+```
+
+The RV64 SBI boot firmware is assembled by `scripts/build_zx32_programs.sh` with the RV64 clang/ld.lld path and emitted as a 64-bit word image via `tools/bin2c_words.py`.
 
 ## Simulator Run Commands
 
@@ -271,6 +297,15 @@ Real Linux boot path:
 ./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl
 ```
 
+RV64 (ZX64) Linux boot path (sim-validated; first board run pending):
+
+```sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_rv64_linux_boot.xsbl
+```
+
+The RV64 XSBL reads the bitstream from the default `build/vivado_hw/` directory, so build the RV64 SoC there (`ZYNQ_CPU_SOC=rv64 ./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl`) before running it.
+
+
 ## Generated Outputs
 
 Common generated outputs:
@@ -279,13 +314,17 @@ Common generated outputs:
 - `hw_bringup/build/elf/*.elf`
 - `hw_bringup/build/ps_uart_probe.elf`
 - `hw_bringup/build/ps_linux_boot.elf`
-- `linux/kernel/`
+- `linux/kernel/`, `linux/kernel-v7.1.3/`
 - `build/linux-mainline-rv32/`
 - `build/buildroot-zx32/`
 - `build/linux/`
 - `build/zx32sim-smokes/`
 - `build/vivado_hw/`
 - `build/vivado_synth/`
+- `build/linux-mainline-rv64/`
+- `build/buildroot-zx64/`, `build/zx64-buildroot/`
+- `build/linux-rv64/` (`zx64.dtb`, `zx64.effective.dts`, `zx64-rootfs.ext4`, `boot_artifacts.env`)
+- `build/vivado_hw_rv64/`
 
 These are build artifacts, not source-of-truth files.
 
@@ -300,5 +339,9 @@ The Linux-facing source files are:
 - `hw_bringup/ps_linux_boot.c`
 - `hw_bringup/programs/linux_boot_firmware.zx32.s`
 - `hw_bringup/download_zynq_cpu_linux_boot.xsbl`
+- `linux/zx64.dts`
+- `linux/zx64_rv64.config`
+- `hw_bringup/programs/linux_boot_firmware.rv64.S`
+- `hw_bringup/download_zynq_cpu_rv64_linux_boot.xsbl`
 
 They are not generated artifacts. Keep them version-controlled and update them whenever the boot address layout, DTB contract, timer model, or interrupt model changes.

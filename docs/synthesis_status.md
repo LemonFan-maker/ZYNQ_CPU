@@ -105,3 +105,50 @@ Run the hardware bring-up build after changes to:
 - AXI interface widths or memory maps
 
 For PS probe C-only changes, `./scripts/build_ps_uart_probe.sh` is enough.
+
+## RV64 (ZX64) Hardware Bring-Up Build
+
+Command:
+
+```sh
+ZYNQ_CPU_SOC=rv64 ZYNQ_CPU_VIVADO_BUILD_DIR=build/vivado_hw_rv64 \
+  ./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl
+```
+
+Last fully-implemented result (2026-07-07, `ZYNQ_CPU_RV64_ENABLE_FPU=0`, recorded in `build/vivado_hw_rv64/reports/`):
+
+- Top: `zynq_cpu_system_wrapper`, part `xc7z020clg400-2`, FCLK0 75.002 MHz
+- Errors: 0; XSA: `build/vivado_hw_rv64/zynq_cpu_system_wrapper.xsa`
+- No `.bit` was retained in that build directory; re-run the command above to regenerate it
+
+Timing snapshot (post-implementation):
+
+| Metric | Value |
+| --- | ---: |
+| Setup WNS | 0.019 ns |
+| Setup TNS | 0.000 ns |
+| Setup failing endpoints | 0 |
+| Hold WHS | 0.038 ns |
+| Hold THS | 0.000 ns |
+| Hold failing endpoints | 0 |
+
+Resource snapshot (`ENABLE_FPU=0`, i.e. RV64IMAC_Zicsr_Zifencei):
+
+| Resource | Used | Device | Percent |
+| --- | ---: | ---: | ---: |
+| Slice LUTs | 16135 | 53200 | 30.33% |
+| Slice Registers | 7786 | 106400 | 7.32% |
+| Block RAM Tile | 14.5 | 140 | 10.36% |
+| DSPs | 0 | 220 | 0.00% |
+
+### FPU Resource Blocker
+
+`vivado/build_hw_bringup.tcl` defaults `rv64_enable_fpu` to 1, and `scripts/check_zx64_linux_boot_chain.sh` requires MISA to advertise F+D (the `zx64.dts`/kernel `CONFIG_FPU=y` contract is RV64GC). However, a full-FPU `zx64_core5` implementation needs ~77.5k LUT-as-logic and fails DRC UTLZ-1 on `xc7z020clg400-2` (53.2k sites): the 2026-07-07 04:40 attempt with `ENABLE_FPU=1` never placed.
+
+This is an open contradiction between the software contract (RV64GC) and the FPGA part (FPU-less fits, FPU-full does not). Options, not yet decided:
+
+- move the FPU datapath to DSP48/multi-cycle microcode to shrink LUT usage,
+- build an `rv64imac` kernel fragment (`CONFIG_FPU=n`, DTB `riscv,isa` without fd) for this board, accepting the boot-chain check must then be relaxed,
+- target a larger part.
+
+Until this is resolved, treat the `ENABLE_FPU=0` build above as the only board-sizable RV64 bitstream, and note that its MISA (`...1105`) does not match the current `rv64gc` DTB string that `check_zx64_linux_boot_chain.sh` enforces.

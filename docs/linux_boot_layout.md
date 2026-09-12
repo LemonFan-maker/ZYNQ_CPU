@@ -151,3 +151,25 @@ PL CPU MMIO timer base: `0x1001_0000`.
 | `0x10` | timer IRQ status |
 
 Linux requests timer events in the CSR `time/timeh` domain. The firmware maps those requests to MMIO `mtimecmp` by storing the observed `mtime - rdtime` offset and by enforcing a minimum future compare window.
+
+## RV64 (ZX64) Layout
+
+The RV64 launcher (built with `-DZYNQ_CPU_RV64_BOOT`) uses the same PS/PL translation (`CPU = PS + 0x8000_0000`) and the same scratch mailbox/console contract as above, but a different placement table, recorded in `build/linux-rv64/boot_artifacts.env`:
+
+| Image or region | PL CPU address | PS physical address | Notes |
+| --- | ---: | ---: | --- |
+| M-mode firmware | `0x0000_0000` | PS writes through IMEM aperture | `linux_boot_firmware.rv64.S`, 32 KiB IMEM |
+| Linux kernel Image | `0x8020_0000` | `0x0020_0000` | RV64 Image, text offset `0x0020_0000` |
+| DTB | `0x8200_0000` | `0x0200_0000` | `build/linux-rv64/zx64.dtb` from `linux/zx64.dts` |
+| boot artifact backup | `0x8410_0000` | `0x0410_0000` | 19 MiB `no-map` |
+| virtio-blk ext4 rootfs | `0x8800_0000` | `0x0800_0000` | 64 MiB reserved; capacity meta block at PS `0x07ff_f000`, magic `0x5A363442` |
+| GPU framebuffer reserve | `0xbc00_0000` | `0x3c00_0000` | 64 MiB `no-map` VRAM; `simple-framebuffer` node is enabled in the effective DTB |
+| PLIC | `0x0c00_0000` | PL CPU MMIO | virtio-blk IRQ source 1, virtio-input source 2 |
+| virtio-blk MMIO | `0x1006_0000` | PL CPU MMIO | virtio 1.0 mmio transport |
+| virtio-input MMIO | `0x1009_0000` | PL CPU MMIO | event queue serviced by PS launcher |
+| SBI console/counter scratch | `0x2001_0000` | AXI-Lite TX scratch aperture | unchanged mailbox layout, plus warm-reboot slots `0x258..0x260` |
+| MMIO timer | `0x1001_0000` | PL CPU MMIO | unchanged |
+
+Kernel bootargs (virtio-root mode): `earlycon=sbi console=hvc0 root=/dev/vda rw rootwait lpj=10000 loglevel=7 ignore_loglevel`. The initramfs-mode fallback (`rdinit=/init` with the embedded Buildroot cpio) remains available through the same launcher.
+
+Validation is performed by `scripts/check_zx64_linux_boot_chain.sh` (image magic/text offset, DTB magic, non-overlap of Image/backup/rootfs/VRAM, core `misa` vs `riscv,isa`, rootfs mode selection) and recorded with SHA256s in `build/linux-rv64/boot_artifacts.env`. Entry convention is unchanged: `a0=0`, `a1=0x8200_0000`, `satp=0`, S-mode, interrupts disabled.

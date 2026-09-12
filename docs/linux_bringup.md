@@ -188,3 +188,50 @@ Use the ordinary board probe for broader CPU/SoC smoke tests:
 3. Clean up the SBI timer model and document whether `time` and `mtime` share a permanent clock domain.
 4. Decide whether the long-term console is SBI/HVC-only or a Linux driver for the PL UART.
 5. Expand MMU, trap, interrupt, and AMO regression tests around the real Linux behavior now observed on hardware.
+
+## RV64 (ZX64) Boot Chain — In Development
+
+The `riscv64gc` branch extends this document's contract to an RV64 platform. Everything in the sections above stays true for ZX32; the differences for ZX64 are:
+
+| Aspect | ZX32 (board-proven) | ZX64 (sim-validated) |
+| --- | --- | --- |
+| Kernel | mainline RV32, text offset `0x0040_0000`, Image at `0x8040_0000` | Linux v7.1.3 RV64, text offset `0x0020_0000`, Image at `0x8020_0000` |
+| MMU | Sv32 | Sv39 |
+| ISA string | `rv32ima...` | `rv64gc_zicsr_zifencei` (misa-gated) |
+| Rootfs | embedded Buildroot cpio initramfs only | embedded cpio as fallback + 64 MiB ext4 image served by PS-backed virtio-blk, `root=/dev/vda rw` |
+| DTB | `linux/zynq_cpu.dts` | `linux/zx64.dts` → `build/linux-rv64/zx64.effective.dts` (PLIC/virtio/simplefb enabled) |
+| Firmware | `linux_boot_firmware.zx32.s` (zx32asm) | `linux_boot_firmware.rv64.S` (clang/ld.lld, `-march=rv64ima_zicsr_zifencei -mabi=lp64`) |
+| Launcher | `ps_linux_boot` default build | same source built with `-DZYNQ_CPU_RV64_BOOT` via `scripts/build_ps_linux_boot_rv64.sh` |
+| XSBL | `download_zynq_cpu_linux_boot.xsbl` | `download_zynq_cpu_rv64_linux_boot.xsbl` |
+| Interrupts | SBI/timer only | PLIC at `0x0c00_0000`; virtio-blk = source 1, virtio-input = source 2 |
+
+The SBI shim contract is intentionally identical: same 256-byte console output ring, 128-byte input ring, mailbox offsets, and `mtime - rdtime` timer bridge (the RV64 firmware additionally defines warm-reboot slots at `0x258..0x260` and time-sample slots at `0x340/0x344`), so the PS-side console mirror and diagnostics work unchanged.
+
+```text
+PS launcher (RV64 build)
+  -> loads rv64 firmware into IMEM, verifies word-by-word
+  -> Linux Image -> PS 0x0020_0000, DTB -> PS 0x0200_0000
+  -> ext4 rootfs -> PS 0x0800_0000 (capacity meta @ 0x07ff_f000, magic 0x5A363442)
+  -> services virtio-blk/input virtqueues over the bring-up-registers window
+  -> releases the PL CPU; S-mode entry a0=0, a1=0x8200_0000, satp=0
+```
+
+Validation status at the time of writing:
+
+- Icarus: `soc64-5stage-linux`, `soc64-5stage-real-sbi`, `zx64-fw`, `zx64-boot-chain` pass.
+- Vivado RV64 implementation: timing met with `ZYNQ_CPU_RV64_ENABLE_FPU=0`; the FPU-enabled RV64GC build over-utilizes the XC7Z020 (see `docs/synthesis_status.md`).
+- Contract checks: `scripts/check_zx64_linux_boot_chain.sh` verifies hashes/addresses/MISA/rootfs mode and writes `build/linux-rv64/boot_artifacts.env`.
+- **Board boot: not yet run.** No RV64 expected-log signature exists in `docs/hardware_uart_test.md` yet. Until one is recorded, do not debug RV64 userspace/kernel issues against hardware assumptions.
+
+Board sequence once RV64 hardware bring-up starts:
+
+```sh
+ZYNQ_CPU_SOC=rv64 ./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl
+./scripts/prepare_mainline_rv64_linux.sh
+./scripts/build_zx64_busybox_rootfs.sh
+./scripts/build_zx64_virtio_rootfs_ext4.sh
+./scripts/prepare_zx64_linux_boot_artifacts.sh
+./scripts/check_zx64_linux_boot_chain.sh
+./scripts/build_ps_linux_boot_rv64.sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_rv64_linux_boot.xsbl
+```

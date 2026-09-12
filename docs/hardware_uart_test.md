@@ -85,6 +85,30 @@ Then run the Linux boot launcher:
 
 This path starts `hw_bringup/build/ps_linux_boot.elf`, copies the Linux Image and DTB into DDR, loads the local M-mode SBI firmware into IMEM, and releases the PL CPU at the Linux entry.
 
+## RV64 (ZX64) Board Boot — Not Yet Run
+
+The RV64 boot chain exists and is simulation-validated, but **no RV64 board run has been recorded yet**, so there is no expected RV64 log signature below. When the first run happens, append its signature to this document the same way the RV32 signature above was recorded.
+
+Board sequence:
+
+```sh
+ZYNQ_CPU_SOC=rv64 ./scripts/run_vivado.sh -mode batch -source vivado/build_hw_bringup.tcl
+./scripts/prepare_mainline_rv64_linux.sh
+./scripts/build_zx64_busybox_rootfs.sh
+./scripts/build_zx64_virtio_rootfs_ext4.sh
+./scripts/prepare_zx64_linux_boot_artifacts.sh
+./scripts/check_zx64_linux_boot_chain.sh
+./scripts/build_ps_linux_boot_rv64.sh
+./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_rv64_linux_boot.xsbl
+```
+
+Differences from the RV32 path the board log will show:
+
+- the launcher banner reports the RV64 build; kernel CPU address is `0x80200000` (RV64 text offset), DTB stays `0x82000000`
+- a 64 MiB ext4 rootfs is staged at PS `0x08000000` and served through the PS-backed virtio-blk ring; success signature is `VFS: Mounted root (ext4 filesystem) on device 254:0` before `buildroot login:`
+- the effective DTB enables the PLIC and virtio nodes; `riscv,isa` must read `rv64gc_zicsr_zifencei`
+- console/timer diagnostics (`off_valid=1`, `cmp > mtime`) are the same scratch-ring contract as RV32
+
 ## Expected Broad Probe PASS Sections
 
 The probe prints one PASS/FAIL line per section. A currently healthy run should include:
