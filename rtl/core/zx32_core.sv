@@ -1404,9 +1404,6 @@ module zx32_core (
                     state <= ST_FETCH;
                 end
                 ST_FETCH: begin
-                    if (csr_satp == 32'd0 && pc[31:16] == 16'd0) begin
-                        current_priv <= PRIV_M;
-                    end
                     if (translate_active && !req_active) begin
                         req_vaddr <= pc;
                         req_paddr <= 32'd0;

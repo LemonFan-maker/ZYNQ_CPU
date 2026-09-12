@@ -7,6 +7,7 @@ module tb_zx32_core;
 
     logic clk;
     logic rst_n;
+    logic soft_reset;
     logic [31:0] reset_vector;
     logic        irq_timer;
     logic        irq_external;
@@ -29,6 +30,7 @@ module tb_zx32_core;
     zx32_core u_core (
         .clk(clk),
         .rst_n(rst_n),
+        .soft_reset(soft_reset),
         .reset_vector(reset_vector),
         .irq_timer(irq_timer),
         .irq_external(irq_external),
@@ -65,6 +67,8 @@ module tb_zx32_core;
         bit super_asid2_valid;
 
         reset_vector = 32'd0;
+        soft_reset = 1'b0;
+        irq_timer = 1'b0;
         irq_external = 1'b0;
 
         u_ram.mem[0]  = 32'h0400_0093; // addi x1, x0, 64
