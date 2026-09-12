@@ -73,8 +73,48 @@ module tb_mmio_gpu_fill;
         end
     endtask
 
+    function automatic logic [7:0] blend_channel(
+        input logic [7:0] src,
+        input logic [7:0] dst,
+        input logic [7:0] alpha
+    );
+        logic [15:0] src_ext;
+        logic [15:0] dst_ext;
+        logic [15:0] alpha_ext;
+        logic [15:0] inv_alpha_ext;
+        logic [17:0] weighted;
+        logic [17:0] biased;
+        logic [17:0] div255;
+
+        src_ext = {8'd0, src};
+        dst_ext = {8'd0, dst};
+        alpha_ext = {8'd0, alpha};
+        inv_alpha_ext = 16'd255 - alpha_ext;
+        weighted = (src_ext * alpha_ext) + (dst_ext * inv_alpha_ext);
+        biased = weighted + 18'd128;
+        div255 = biased + {10'd0, biased[17:8]};
+        blend_channel = div255[15:8];
+    endfunction
+
+    function automatic logic [31:0] blend_xrgb8888(
+        input logic [31:0] src,
+        input logic [31:0] dst,
+        input logic [7:0] alpha
+    );
+        blend_xrgb8888 = {
+            8'hff,
+            blend_channel(src[23:16], dst[23:16], alpha),
+            blend_channel(src[15:8], dst[15:8], alpha),
+            blend_channel(src[7:0], dst[7:0], alpha)
+        };
+    endfunction
+
     initial begin
         logic [31:0] status;
+        logic [31:0] expected0;
+        logic [31:0] expected1;
+        logic [31:0] expected2;
+        logic [31:0] expected3;
 
         valid = 1'b0;
         we = 1'b0;
@@ -328,6 +368,123 @@ module tb_mmio_gpu_fill;
         host_read(32'h1007_0048, status);
         if (status !== 32'd33) begin
             $fatal(1, "expected perf_write_count=33 after color-key blit, got %08x", status);
+        end
+
+        host_write(32'h1007_0000, 32'h8000_0000);
+        write_count = 0;
+        for (int i = 0; i < 16; i++) begin
+            writes[i] = 32'd0;
+            write_addrs[i] = 32'd0;
+        end
+        for (int i = 0; i < 16; i++) begin
+            ddr_mem[i] = 32'd0;
+        end
+        ddr_mem[64] = 32'h0102_0304;
+        ddr_mem[65] = 32'h1112_1314;
+        ddr_mem[66] = 32'h2122_2324;
+        ddr_mem[67] = 32'h3132_3334;
+        host_write(32'h1007_0008, 32'h8000_0000);
+        host_write(32'h1007_000c, 32'd16);
+        host_write(32'h1007_0010, 32'h0004_0004);
+        host_write(32'h1007_0018, 32'h0000_0000);
+        host_write(32'h1007_001c, 32'h0004_0004);
+        host_write(32'h1007_004c, 32'h8000_0100);
+        host_write(32'h1007_0050, 32'd8);
+        host_write(32'h1007_0054, 32'h0002_0002);
+        host_write(32'h1007_0000, 32'h0000_0061);
+
+        repeat (300) begin
+            host_read(32'h1007_0004, status);
+            if (status[1]) break;
+            @(posedge clk);
+        end
+
+        if (status !== 32'h0000_0002) begin
+            $fatal(1, "GPU unit scale blit failed, status=%08x", status);
+        end
+        if (write_count !== 16) begin
+            $fatal(1, "expected 16 scale blit writes, got %0d", write_count);
+        end
+        if (ddr_mem[0] !== 32'h0102_0304 ||
+            ddr_mem[1] !== 32'h0102_0304 ||
+            ddr_mem[2] !== 32'h1112_1314 ||
+            ddr_mem[3] !== 32'h1112_1314 ||
+            ddr_mem[4] !== 32'h0102_0304 ||
+            ddr_mem[5] !== 32'h0102_0304 ||
+            ddr_mem[6] !== 32'h1112_1314 ||
+            ddr_mem[7] !== 32'h1112_1314 ||
+            ddr_mem[8] !== 32'h2122_2324 ||
+            ddr_mem[9] !== 32'h2122_2324 ||
+            ddr_mem[10] !== 32'h3132_3334 ||
+            ddr_mem[11] !== 32'h3132_3334 ||
+            ddr_mem[12] !== 32'h2122_2324 ||
+            ddr_mem[13] !== 32'h2122_2324 ||
+            ddr_mem[14] !== 32'h3132_3334 ||
+            ddr_mem[15] !== 32'h3132_3334) begin
+            $fatal(1, "scale blit destination mismatch");
+        end
+        host_read(32'h1007_0048, status);
+        if (status !== 32'd49) begin
+            $fatal(1, "expected perf_write_count=49 after scale blit, got %08x", status);
+        end
+
+        host_write(32'h1007_0000, 32'h8000_0000);
+        write_count = 0;
+        for (int i = 0; i < 16; i++) begin
+            writes[i] = 32'd0;
+            write_addrs[i] = 32'd0;
+        end
+        ddr_mem[5] = 32'hff20_4060;
+        ddr_mem[6] = 32'hff20_4060;
+        ddr_mem[9] = 32'hff20_4060;
+        ddr_mem[10] = 32'hff20_4060;
+        ddr_mem[96] = 32'hffe0_2010;
+        ddr_mem[97] = 32'hff10_20e0;
+        ddr_mem[100] = 32'hff20_e010;
+        ddr_mem[101] = 32'hffe0_e020;
+        expected0 = blend_xrgb8888(32'hffe0_2010, 32'hff20_4060, 8'd128);
+        expected1 = blend_xrgb8888(32'hff10_20e0, 32'hff20_4060, 8'd128);
+        expected2 = blend_xrgb8888(32'hff20_e010, 32'hff20_4060, 8'd128);
+        expected3 = blend_xrgb8888(32'hffe0_e020, 32'hff20_4060, 8'd128);
+        host_write(32'h1007_0008, 32'h8000_0000);
+        host_write(32'h1007_000c, 32'd16);
+        host_write(32'h1007_0010, 32'h0004_0004);
+        host_write(32'h1007_0018, 32'h0001_0001);
+        host_write(32'h1007_001c, 32'h0002_0002);
+        host_write(32'h1007_004c, 32'h8000_0180);
+        host_write(32'h1007_0050, 32'd16);
+        host_write(32'h1007_0058, 32'd128);
+        host_read(32'h1007_0058, status);
+        if (status !== 32'd128) begin
+            $fatal(1, "alpha register readback mismatch: %08x", status);
+        end
+        host_write(32'h1007_0000, 32'h0000_0071);
+
+        repeat (200) begin
+            host_read(32'h1007_0004, status);
+            if (status[1]) break;
+            @(posedge clk);
+        end
+
+        if (status !== 32'h0000_0002) begin
+            $fatal(1, "GPU unit alpha blit failed, status=%08x", status);
+        end
+        if (write_count !== 4) begin
+            $fatal(1, "expected 4 alpha blit writes, got %0d", write_count);
+        end
+        if (ddr_mem[5] !== expected0 ||
+            ddr_mem[6] !== expected1 ||
+            ddr_mem[9] !== expected2 ||
+            ddr_mem[10] !== expected3) begin
+            $fatal(1, "alpha blit destination mismatch: %08x/%08x %08x/%08x %08x/%08x %08x/%08x",
+                   ddr_mem[5], expected0,
+                   ddr_mem[6], expected1,
+                   ddr_mem[9], expected2,
+                   ddr_mem[10], expected3);
+        end
+        host_read(32'h1007_0048, status);
+        if (status !== 32'd53) begin
+            $fatal(1, "expected perf_write_count=53 after alpha blit, got %08x", status);
         end
 
         $display("PASS");

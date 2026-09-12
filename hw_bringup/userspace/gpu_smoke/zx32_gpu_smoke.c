@@ -38,12 +38,16 @@
 #define GPU_CMD_DONE     0x38u
 #define GPU_SRC_ADDR     0x4cu
 #define GPU_SRC_STRIDE   0x50u
+#define GPU_SRC_SIZE     0x54u
+#define GPU_ALPHA_CTRL   0x58u
 
 #define GPU_OP_CLEAR     1u
 #define GPU_OP_FILL_RECT 2u
 #define GPU_OP_DRAW_LINE 3u
 #define GPU_OP_BLIT      4u
 #define GPU_OP_COLOR_KEY_BLIT 5u
+#define GPU_OP_SCALE_BLIT 6u
+#define GPU_OP_ALPHA_BLIT 7u
 #define GPU_STATUS_BUSY  (1u << 0)
 #define GPU_STATUS_DONE  (1u << 1)
 #define GPU_STATUS_ERROR (1u << 2)
@@ -57,6 +61,12 @@
 #define BLIT_SRC3        0x31323334u
 #define COLOR_KEY        0x00ff00ffu
 #define KEY_DST_SENTINEL 0x55667788u
+#define ALPHA_VALUE      128u
+#define ALPHA_DST_COLOR  0xff204060u
+#define ALPHA_SRC0       0xffe02010u
+#define ALPHA_SRC1       0xff1020e0u
+#define ALPHA_SRC2       0xff20e010u
+#define ALPHA_SRC3       0xffe0e020u
 
 static volatile uint32_t *g_gpu;
 static int g_verbose = 1;
@@ -225,6 +235,67 @@ static int verify_color_key_pixels(volatile uint32_t *fb) {
                 fb[4u + 1u * FB_WIDTH], fb[5u + 1u * FB_WIDTH],
                 fb[4u + 2u * FB_WIDTH], fb[5u + 2u * FB_WIDTH]);
         return -1;
+    }
+    return 0;
+}
+
+static int verify_scale_pixels(volatile uint32_t *fb) {
+    const uint32_t expected[4][4] = {
+        {BLIT_SRC0, BLIT_SRC0, BLIT_SRC1, BLIT_SRC1},
+        {BLIT_SRC0, BLIT_SRC0, BLIT_SRC1, BLIT_SRC1},
+        {BLIT_SRC2, BLIT_SRC2, BLIT_SRC3, BLIT_SRC3},
+        {BLIT_SRC2, BLIT_SRC2, BLIT_SRC3, BLIT_SRC3},
+    };
+
+    for (uint32_t y = 0; y < 4u; y++) {
+        for (uint32_t x = 0; x < 4u; x++) {
+            uint32_t got = fb[y * FB_WIDTH + x];
+            if (got != expected[y][x]) {
+                fprintf(stderr,
+                        "scale blit verify failed at %u,%u: expected 0x%08" PRIx32
+                        ", got 0x%08" PRIx32 "\n",
+                        x, y, expected[y][x], got);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static uint8_t blend_channel(uint8_t src, uint8_t dst, uint8_t alpha) {
+    uint32_t weighted = (uint32_t)src * alpha + (uint32_t)dst * (255u - alpha);
+    uint32_t biased = weighted + 128u;
+    uint32_t div255 = biased + (biased >> 8);
+    return (uint8_t)(div255 >> 8);
+}
+
+static uint32_t blend_xrgb8888(uint32_t src, uint32_t dst, uint8_t alpha) {
+    uint32_t r = blend_channel((uint8_t)(src >> 16), (uint8_t)(dst >> 16), alpha);
+    uint32_t g = blend_channel((uint8_t)(src >> 8), (uint8_t)(dst >> 8), alpha);
+    uint32_t b = blend_channel((uint8_t)src, (uint8_t)dst, alpha);
+    return 0xff000000u | (r << 16) | (g << 8) | b;
+}
+
+static int verify_alpha_pixels(volatile uint32_t *fb) {
+    const uint32_t src[4] = {
+        ALPHA_SRC0, ALPHA_SRC1,
+        ALPHA_SRC2, ALPHA_SRC3,
+    };
+
+    for (uint32_t y = 0; y < 2u; y++) {
+        for (uint32_t x = 0; x < 2u; x++) {
+            uint32_t expected = blend_xrgb8888(src[y * 2u + x],
+                                               ALPHA_DST_COLOR,
+                                               (uint8_t)ALPHA_VALUE);
+            uint32_t got = fb[(3u + x) + (1u + y) * FB_WIDTH];
+            if (got != expected) {
+                fprintf(stderr,
+                        "alpha blit verify failed at %u,%u: expected 0x%08" PRIx32
+                        ", got 0x%08" PRIx32 "\n",
+                        x, y, expected, got);
+                return -1;
+            }
+        }
     }
     return 0;
 }
@@ -429,6 +500,71 @@ int main(int argc, char **argv) {
         return 1;
     }
     gpu_log("[gpu_smoke] color-key blit verify passed");
+
+    for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        fb[i] = 0u;
+    }
+    blit_src[0] = BLIT_SRC0;
+    blit_src[1] = BLIT_SRC1;
+    blit_src[FB_WIDTH] = BLIT_SRC2;
+    blit_src[FB_WIDTH + 1u] = BLIT_SRC3;
+    gpu_log("[gpu_smoke] framebuffer prepared for scale blit src=2x2 dst=4x4");
+    mmio_write(GPU_CONTROL, 1u << 31);
+    mmio_write(GPU_FB_ADDR, (uint32_t)fb_base);
+    mmio_write(GPU_FB_STRIDE, FB_STRIDE);
+    mmio_write(GPU_FB_SIZE, (FB_HEIGHT << 16) | FB_WIDTH);
+    mmio_write(GPU_RECT_ORIGIN, 0u);
+    mmio_write(GPU_RECT_SIZE, (4u << 16) | 4u);
+    mmio_write(GPU_SRC_ADDR, (uint32_t)(fb_base + BLIT_SRC_OFFSET));
+    mmio_write(GPU_SRC_STRIDE, FB_STRIDE);
+    mmio_write(GPU_SRC_SIZE, (2u << 16) | 2u);
+
+    rc = start_gpu(GPU_OP_SCALE_BLIT, &status);
+    if (rc != 0) {
+        fprintf(stderr, "GPU scale blit failed: rc=%d status=0x%08" PRIx32 "\n",
+                rc, status);
+        return 1;
+    }
+    gpu_log("[gpu_smoke] scale blit complete status=0x%08" PRIx32, status);
+    if (verify_scale_pixels(fb) != 0) {
+        return 1;
+    }
+    gpu_log("[gpu_smoke] scale blit verify passed");
+
+    for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        fb[i] = 0u;
+    }
+    fb[3u + 1u * FB_WIDTH] = ALPHA_DST_COLOR;
+    fb[4u + 1u * FB_WIDTH] = ALPHA_DST_COLOR;
+    fb[3u + 2u * FB_WIDTH] = ALPHA_DST_COLOR;
+    fb[4u + 2u * FB_WIDTH] = ALPHA_DST_COLOR;
+    blit_src[0] = ALPHA_SRC0;
+    blit_src[1] = ALPHA_SRC1;
+    blit_src[FB_WIDTH] = ALPHA_SRC2;
+    blit_src[FB_WIDTH + 1u] = ALPHA_SRC3;
+    gpu_log("[gpu_smoke] framebuffer prepared for alpha blit alpha=%u",
+            ALPHA_VALUE);
+    mmio_write(GPU_CONTROL, 1u << 31);
+    mmio_write(GPU_FB_ADDR, (uint32_t)fb_base);
+    mmio_write(GPU_FB_STRIDE, FB_STRIDE);
+    mmio_write(GPU_FB_SIZE, (FB_HEIGHT << 16) | FB_WIDTH);
+    mmio_write(GPU_RECT_ORIGIN, (1u << 16) | 3u);
+    mmio_write(GPU_RECT_SIZE, (2u << 16) | 2u);
+    mmio_write(GPU_SRC_ADDR, (uint32_t)(fb_base + BLIT_SRC_OFFSET));
+    mmio_write(GPU_SRC_STRIDE, FB_STRIDE);
+    mmio_write(GPU_ALPHA_CTRL, ALPHA_VALUE);
+
+    rc = start_gpu(GPU_OP_ALPHA_BLIT, &status);
+    if (rc != 0) {
+        fprintf(stderr, "GPU alpha blit failed: rc=%d status=0x%08" PRIx32 "\n",
+                rc, status);
+        return 1;
+    }
+    gpu_log("[gpu_smoke] alpha blit complete status=0x%08" PRIx32, status);
+    if (verify_alpha_pixels(fb) != 0) {
+        return 1;
+    }
+    gpu_log("[gpu_smoke] alpha blit verify passed");
 
     printf("zx32_gpu_smoke: PASS fb=0x%08lx gpu=0x%08lx size=%ux%u stride=%u\n",
            fb_base, gpu_base, FB_WIDTH, FB_HEIGHT, FB_STRIDE);
