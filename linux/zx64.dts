@@ -1,0 +1,159 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    compatible = "orion,zx64", "orion,zynq-cpu";
+    model = "ZYNQ_CPU ZX64 RV64 bring-up platform";
+
+    chosen {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        boot-hartid = <0>;
+        bootargs = "earlycon=sbi console=hvc0 rdinit=/init lpj=10000 loglevel=7 ignore_loglevel";
+
+        zx64_simplefb: framebuffer@bc000000 {
+            compatible = "simple-framebuffer";
+            reg = <0x0 0xbc000000 0x0 0x007e9000>;
+            width = <1920>;
+            height = <1080>;
+            stride = <7680>;
+            format = "x8r8g8b8";
+            status = "disabled";
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x0 0x80000000 0x0 0x40000000>;
+    };
+
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+
+        boot_artifacts_backup: boot-artifacts@84100000 {
+            reg = <0x0 0x84100000 0x0 0x01300000>;
+            no-map;
+        };
+
+        zx64_vram: vram@bc000000 {
+            reg = <0x0 0xbc000000 0x0 0x04000000>;
+            no-map;
+        };
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <75000000>;
+
+        cpu0: cpu@0 {
+            device_type = "cpu";
+            reg = <0>;
+            status = "okay";
+            compatible = "riscv";
+            riscv,isa = "rv64gc_zicsr_zifencei";
+            riscv,isa-base = "rv64i";
+            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
+            mmu-type = "riscv,sv39";
+            i-cache-block-size = <32>;
+            i-cache-sets = <16>;
+            i-cache-size = <512>;
+            d-cache-block-size = <32>;
+            d-cache-sets = <32>;
+            d-cache-size = <1024>;
+
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                interrupt-controller;
+                compatible = "riscv,cpu-intc";
+            };
+        };
+    };
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        compatible = "simple-bus";
+        ranges;
+
+        plic0: interrupt-controller@c000000 {
+            compatible = "sifive,plic-1.0.0", "riscv,plic0";
+            reg = <0x0 0x0c000000 0x0 0x00400000>;
+            interrupt-controller;
+            #address-cells = <0>;
+            #interrupt-cells = <1>;
+            riscv,ndev = <2>;
+            interrupts-extended = <&cpu0_intc 9>;
+            status = "disabled";
+        };
+
+        uart0: serial@10000000 {
+            compatible = "orion,zynq-cpu-uart";
+            reg = <0x0 0x10000000 0x0 0x1000>;
+            status = "disabled";
+        };
+
+        timer0: timer@10010000 {
+            compatible = "orion,zynq-cpu-timer";
+            reg = <0x0 0x10010000 0x0 0x1000>;
+            interrupts-extended = <&cpu0_intc 5>;
+            status = "disabled";
+        };
+
+        datamover0: dma@10020000 {
+            compatible = "orion,zynq-cpu-datamover";
+            reg = <0x0 0x10020000 0x0 0x1000>;
+            status = "disabled";
+        };
+
+        irqctrl0: interrupt-controller@10040000 {
+            compatible = "orion,zynq-cpu-irqctrl";
+            reg = <0x0 0x10040000 0x0 0x1000>;
+            interrupt-controller;
+            #interrupt-cells = <1>;
+            interrupts-extended = <&cpu0_intc 9>;
+            status = "disabled";
+        };
+
+        virtio_blk0: virtio@10060000 {
+            compatible = "virtio,mmio";
+            reg = <0x0 0x10060000 0x0 0x1000>;
+            interrupts-extended = <&plic0 1>;
+            status = "disabled";
+        };
+
+        virtio_input0: virtio@10090000 {
+            compatible = "virtio,mmio";
+            reg = <0x0 0x10090000 0x0 0x1000>;
+            interrupts-extended = <&plic0 2>;
+            status = "disabled";
+        };
+
+        gpu0: gpu@10070000 {
+            compatible = "orion,zynq-cpu-gpu-fill";
+            reg = <0x0 0x10070000 0x0 0x1000>;
+            status = "disabled";
+        };
+
+        display0: display@10080000 {
+            compatible = "orion,zynq-cpu-display";
+            reg = <0x0 0x10080000 0x0 0x1000>;
+            status = "disabled";
+        };
+
+        scratch_rx: sram@20000000 {
+            compatible = "mmio-sram";
+            reg = <0x0 0x20000000 0x0 0x1000>;
+            status = "disabled";
+        };
+
+        scratch_tx: sram@20010000 {
+            compatible = "mmio-sram";
+            reg = <0x0 0x20010000 0x0 0x1000>;
+            status = "disabled";
+        };
+    };
+};

@@ -1,0 +1,177 @@
+set bitstream "./build/vivado_hw/zynq_cpu_hw.runs/impl_1/zynq_cpu_system_wrapper.bit"
+set ps7_init "./build/vivado_hw/zynq_cpu_hw.gen/sources_1/bd/zynq_cpu_system/ip/zynq_cpu_system_processing_system7_0_0/ps7_init.tcl"
+set kernel_image "./build/linux-mainline-rv64/arch/riscv/boot/Image"
+set kernel_dtb "./build/linux-rv64/zx64.dtb"
+set boot_manifest "./build/linux-rv64/boot_artifacts.env"
+set ps_launcher "./hw_bringup/build/ps_linux_boot.elf"
+set rootfs_cpio "./build/buildroot-zx64/images/rootfs.cpio"
+set virtio_blk_ps_addr "0x08000000"
+set virtio_blk_cpu_addr "0x88000000"
+set virtio_blk_meta_ps_addr "0x07fff000"
+set virtio_blk_meta_magic "0x5A363442"
+set initramfs_bootargs "earlycon=sbi console=hvc0 rdinit=/init lpj=10000 loglevel=7 ignore_loglevel"
+set virtio_root_bootargs "earlycon=sbi console=hvc0 root=/dev/vda rw rootwait lpj=10000 loglevel=7 ignore_loglevel"
+
+proc read_boot_manifest {path} {
+    if {![file exists $path]} {
+        error "required boot manifest is missing: $path"
+    }
+
+    set manifest [dict create]
+    set fh [open $path r]
+    while {[gets $fh line] >= 0} {
+        set line [string trim $line]
+        if {$line eq "" || [string index $line 0] eq "#"} {
+            continue
+        }
+        set eq [string first "=" $line]
+        if {$eq < 1} {
+            close $fh
+            error "malformed boot manifest line: $line"
+        }
+        set key [string range $line 0 [expr {$eq - 1}]]
+        set value [string range $line [expr {$eq + 1}] end]
+        dict set manifest $key $value
+    }
+    close $fh
+    return $manifest
+}
+
+proc manifest_get {manifest key} {
+    if {![dict exists $manifest $key]} {
+        error "boot manifest missing key: $key"
+    }
+    return [dict get $manifest $key]
+}
+
+proc manifest_has {manifest key} {
+    return [dict exists $manifest $key]
+}
+
+proc sha256_file {path} {
+    set line [exec sha256sum $path]
+    return [lindex [split $line] 0]
+}
+
+proc require_manifest_value {manifest key expected} {
+    set got [manifest_get $manifest $key]
+    if {$got ne $expected} {
+        error "boot manifest $key mismatch: got $got expected $expected"
+    }
+}
+
+proc require_manifest_file {manifest path path_key size_key sha_key} {
+    set expected_path [manifest_get $manifest $path_key]
+    if {[file normalize $expected_path] ne [file normalize $path]} {
+        error "boot manifest $path_key mismatch: got $expected_path expected $path"
+    }
+    set expected_size [manifest_get $manifest $size_key]
+    set actual_size [file size $path]
+    if {$expected_size ne "$actual_size"} {
+        error "boot manifest $size_key mismatch: got $expected_size expected $actual_size"
+    }
+    set expected_sha [manifest_get $manifest $sha_key]
+    set actual_sha [sha256_file $path]
+    if {$expected_sha ne $actual_sha} {
+        error "boot manifest $sha_key mismatch: got $expected_sha expected $actual_sha"
+    }
+}
+
+foreach artifact [list $bitstream $ps7_init $kernel_image $kernel_dtb $boot_manifest $ps_launcher $rootfs_cpio] {
+    if {![file exists $artifact]} {
+        error "required artifact is missing: $artifact"
+    }
+}
+
+set manifest [read_boot_manifest $boot_manifest]
+require_manifest_value $manifest "LINUX_TAG" "v7.1.3"
+require_manifest_value $manifest "LINUX_RELEASE" "7.1.3"
+require_manifest_value $manifest "LINUX_SOURCE_CLEAN" "1"
+require_manifest_value $manifest "KERNEL_CPU_ADDR" "0x80200000"
+require_manifest_value $manifest "KERNEL_PS_ADDR" "0x00200000"
+require_manifest_value $manifest "KERNEL_TEXT_OFFSET" "0x0000000000200000"
+require_manifest_value $manifest "DTB_CPU_ADDR" "0x82000000"
+require_manifest_value $manifest "DTB_PS_ADDR" "0x02000000"
+require_manifest_value $manifest "ZX64_VIRTIO_BLK_IMAGE_META_PS_ADDR" $virtio_blk_meta_ps_addr
+require_manifest_value $manifest "ZX64_VIRTIO_BLK_IMAGE_META_MAGIC" $virtio_blk_meta_magic
+require_manifest_file $manifest $kernel_image "LINUX_IMAGE" "LINUX_IMAGE_SIZE" "LINUX_IMAGE_SHA256"
+require_manifest_file $manifest $kernel_dtb "LINUX_DTB" "LINUX_DTB_SIZE" "LINUX_DTB_SHA256"
+require_manifest_file $manifest $rootfs_cpio "ROOTFS_CPIO" "ROOTFS_CPIO_SIZE" "ROOTFS_CPIO_SHA256"
+require_manifest_value $manifest "LINUX_EMBEDDED_INITRAMFS_SIZE" [manifest_get $manifest "ROOTFS_CPIO_SIZE"]
+require_manifest_value $manifest "LINUX_EMBEDDED_INITRAMFS_SHA256" [manifest_get $manifest "ROOTFS_CPIO_SHA256"]
+require_manifest_file $manifest $ps_launcher "PS_LINUX_BOOT_ELF" "PS_LINUX_BOOT_ELF_SIZE" "PS_LINUX_BOOT_ELF_SHA256"
+
+set virtio_blk_image ""
+set virtio_blk_present [manifest_get $manifest "ZX64_VIRTIO_BLK_IMAGE_PRESENT"]
+if {$virtio_blk_present eq "1"} {
+    require_manifest_value $manifest "LINUX_DTB_STORAGE_MODE" "virtio-blk"
+    require_manifest_value $manifest "LINUX_DTB_BOOTARGS" $virtio_root_bootargs
+    if {![manifest_has $manifest "ZX64_VIRTIO_BLK_IMAGE"]} {
+        error "boot manifest marks virtio block present but lacks ZX64_VIRTIO_BLK_IMAGE"
+    }
+    set virtio_blk_image [manifest_get $manifest "ZX64_VIRTIO_BLK_IMAGE"]
+    require_manifest_file $manifest $virtio_blk_image "ZX64_VIRTIO_BLK_IMAGE" "ZX64_VIRTIO_BLK_IMAGE_SIZE" "ZX64_VIRTIO_BLK_IMAGE_SHA256"
+    require_manifest_value $manifest "ZX64_VIRTIO_BLK_PS_ADDR" $virtio_blk_ps_addr
+    require_manifest_value $manifest "ZX64_VIRTIO_BLK_CPU_ADDR" $virtio_blk_cpu_addr
+    require_manifest_value $manifest "ZX64_VIRTIO_BLK_ROOTFS_EXT4" "1"
+
+    set virtio_blk_size [file size $virtio_blk_image]
+    if {$virtio_blk_size == 0 || ($virtio_blk_size % 512) != 0} {
+        error "ZX64 virtio block image size must be a non-zero multiple of 512 bytes: $virtio_blk_size"
+    }
+    set virtio_blk_max_bytes [manifest_get $manifest "ZX64_VIRTIO_BLK_IMAGE_MAX_BYTES"]
+    if {$virtio_blk_size > $virtio_blk_max_bytes} {
+        error "ZX64 virtio block image exceeds max bytes: $virtio_blk_size"
+    }
+    require_manifest_value $manifest "ZX64_VIRTIO_BLK_CAPACITY_SECTORS" [expr {$virtio_blk_size / 512}]
+} elseif {$virtio_blk_present ne "0"} {
+    error "boot manifest has invalid ZX64_VIRTIO_BLK_IMAGE_PRESENT=$virtio_blk_present"
+} else {
+    require_manifest_value $manifest "LINUX_DTB_STORAGE_MODE" "initramfs"
+    require_manifest_value $manifest "LINUX_DTB_BOOTARGS" $initramfs_bootargs
+}
+
+puts "ZX64 RV64 Linux boot download"
+puts "  bitstream: $bitstream"
+puts "  manifest:  $boot_manifest"
+puts "  kernel:    $kernel_image ([file size $kernel_image] bytes) -> PS 0x00200000"
+puts "  dtb:       $kernel_dtb ([file size $kernel_dtb] bytes) -> PS 0x02000000"
+if {$virtio_blk_image ne ""} {
+    puts "  virtio:    $virtio_blk_image ([file size $virtio_blk_image] bytes) -> PS $virtio_blk_ps_addr"
+}
+puts "  launcher:  $ps_launcher ([file size $ps_launcher] bytes)"
+puts "  Linux:     [manifest_get $manifest LINUX_RELEASE] commit [manifest_get $manifest LINUX_SOURCE_COMMIT]"
+
+connect
+set arm_targets {}
+set target_status [catch {targets -filter {name =~ "ARM*#0"}} arm_targets]
+if {$target_status != 0 || [llength $arm_targets] == 0} {
+    puts "No ARM*#0 JTAG target found. Check board power, JTAG cable, and hw_server visibility."
+    puts "Available targets:"
+    catch {targets}
+    exit 1
+}
+targets -set -filter {name =~ "ARM*#0"}
+rst -system
+fpga -f $bitstream
+source $ps7_init
+ps7_init
+ps7_post_config
+dow -data $kernel_image 0x00200000
+dow -data $kernel_dtb 0x02000000
+if {$virtio_blk_image ne ""} {
+    dow -data $virtio_blk_image 0x08000000
+    mwr 0x07fff000 0x5A363442
+    mwr 0x07fff004 0x08000000
+    mwr 0x07fff008 $virtio_blk_size
+    mwr 0x07fff00c [expr {$virtio_blk_size / 512}]
+    mwr 0x07fff010 0x00000000
+} else {
+    mwr 0x07fff000 0x00000000
+    mwr 0x07fff004 0x00000000
+    mwr 0x07fff008 0x00000000
+    mwr 0x07fff00c 0x00000000
+    mwr 0x07fff010 0x00000000
+}
+dow $ps_launcher
+con

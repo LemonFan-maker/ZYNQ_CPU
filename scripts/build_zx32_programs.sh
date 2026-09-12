@@ -7,6 +7,7 @@ gen_dir="$build_dir/generated"
 asm="$repo_dir/tools/zx32asm.py"
 elf="$repo_dir/tools/zx32elf.py"
 bin2c="$repo_dir/tools/bin2c.py"
+bin2c_words="$repo_dir/tools/bin2c_words.py"
 
 mkdir -p "$gen_dir"
 mkdir -p "$build_dir/elf"
@@ -33,6 +34,22 @@ python3 "$elf" "$repo_dir/hw_bringup/programs/linux_image_layout_smoke.zx32.s" -
 python3 "$elf" "$repo_dir/hw_bringup/programs/linux_sbi_firmware_smoke.zx32.s" -o "$build_dir/elf/linux_sbi_firmware_smoke.elf" --load-addr 0x0
 python3 "$elf" "$repo_dir/hw_bringup/programs/linux_sbi_payload_smoke.zx32.s" -o "$build_dir/elf/linux_sbi_payload_smoke.elf" --load-addr 0x80000000
 python3 "$elf" "$repo_dir/hw_bringup/programs/linux_boot_firmware.zx32.s" -o "$build_dir/elf/linux_boot_firmware.elf" --load-addr 0x0
+
+for tool in clang ld.lld llvm-objcopy; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "Missing $tool; cannot build RV64 Linux boot firmware." >&2
+    exit 2
+  fi
+done
+
+clang --target=riscv64-unknown-elf \
+  -march=rv64ima_zicsr_zifencei -mabi=lp64 \
+  -fuse-ld=lld \
+  -nostdlib \
+  -Wl,--image-base=0x0 -Wl,-Ttext=0x0 -Wl,-e,_start -Wl,--no-relax -Wl,--build-id=none \
+  "$repo_dir/hw_bringup/programs/linux_boot_firmware.rv64.S" \
+  -o "$build_dir/elf/linux_boot_firmware.rv64.elf"
+llvm-objcopy -O binary -j .text "$build_dir/elf/linux_boot_firmware.rv64.elf" "$build_dir/elf/linux_boot_firmware.rv64.bin"
 
 tmp_header="$(mktemp "$gen_dir/zx32_programs.XXXXXX")"
 trap 'rm -f "$tmp_header"' EXIT
@@ -85,6 +102,8 @@ trap 'rm -f "$tmp_header"' EXIT
   printf '\n'
   python3 "$asm" "$repo_dir/hw_bringup/programs/linux_boot_firmware.zx32.s" --format c --c-type u32 --array-name zx32_linux_boot_firmware_program
   printf '\n'
+  python3 "$bin2c_words" "$build_dir/elf/linux_boot_firmware.rv64.bin" --array-name zx64_linux_boot_firmware_program
+  printf '\n'
   python3 "$bin2c" "$build_dir/elf/ps_bram_load.elf" --array-name zx32_ps_bram_load_elf
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/xcpyw_check.elf" --array-name zx32_xcpyw_check_elf
@@ -128,6 +147,8 @@ trap 'rm -f "$tmp_header"' EXIT
   python3 "$bin2c" "$build_dir/elf/linux_sbi_payload_smoke.elf" --array-name zx32_linux_sbi_payload_smoke_elf
   printf '\n'
   python3 "$bin2c" "$build_dir/elf/linux_boot_firmware.elf" --array-name zx32_linux_boot_firmware_elf
+  printf '\n'
+  python3 "$bin2c" "$build_dir/elf/linux_boot_firmware.rv64.elf" --array-name zx64_linux_boot_firmware_elf
   printf '\n#endif\n'
 } > "$tmp_header"
 
