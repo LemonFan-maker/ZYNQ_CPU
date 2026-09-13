@@ -171,6 +171,35 @@ PL CPU display-control base address: `0x1008_0000`
 | `0x1c` | underflow count | future DMA underflow counter |
 | `0x20` | scan position | `{v_count[15:0], h_count[15:0]}` |
 
+## LCD Console (Display2) on J20
+
+The 480x272 RGB888 DE-mode LCD on the J20 expansion header is a second text
+console that mirrors the HDMI console's boot text at all times. It reuses the
+same text-console architecture (dual-clock BRAM text/attr/font RAMs + 3-stage
+pixel pipeline + 16-colour palette) with a parallel RGB888 output and a
+9.375 MHz pixel clock derived from a second MMCM tap (180-degree ODDR DCLK,
+matching the classes-project panel recipe). Geometry: 60x17 cells of 8x16
+characters exactly tiling 480x272. The PS write path is a second MMIO window
+behind the same `mmio_*_display_ctrl` pattern.
+
+PL CPU LCD console base address: `0x1009_0000`
+
+| Offset | Register | Description |
+| ---: | --- | --- |
+| `0x00` | control | bit 0 enable |
+| `0x04` | status | bit 0 display enable, bit 1 text enable |
+| `0x18` | background color | XRGB8888 |
+| `0x24` | text control | bit 0 text enable, bit 1 clear (combinational pulse) |
+| `0x400` | text RAM | 255 words (1020 cells, byte-packed) |
+| `0x800` | attr RAM | 128 words (8 cells/word, 4-bit fg nibbles) |
+| `0xA00` | font RAM | 512 words (128 chars x 16 rows) |
+
+The RTL console blocks are `rtl/video/lcd_text_console_core.sv` (pipeline),
+`rtl/video/mmio_lcd_display_ctrl.sv` (register front-end), and
+`rtl/video/lcd_console_top_xilinx.v` (MMCM/BUFG/ODDR board top). PS firmware
+mirrors every console byte into both consoles (`hdmi_console_putc` fans out to
+the HDMI and LCD parsers, each with independent ANSI state).
+
 ## PS-Side AXI Register Windows
 
 The ARM-side bring-up probe uses these PS-visible addresses:
@@ -178,12 +207,13 @@ The ARM-side bring-up probe uses these PS-visible addresses:
 | PS address | Region |
 | ---: | --- |
 | `0x43c0_0000` | build-id/status/scratch AXI-Lite probe registers |
-| `0x43c1_0000` | DataMover and PL CPU control aperture |
-| `0x43c1_1000` | RX scratch region |
-| `0x43c1_2000` | TX scratch/mailbox region |
-| `0x43c1_3000` | PL CPU IMEM load window |
-| `0x43c1_7000` | PL CPU reset/status/reset-vector control |
-| `0x43c1_9000` | PL CPU display-control MMIO alias |
+| `0x43c2_0000` | DataMover and PL CPU control aperture (rv32: 128K; rv64: 64K) |
+| `0x43c2_1000` | RX scratch region |
+| `0x43c2_2000` | TX scratch/mailbox region |
+| `0x43c2_3000` | PL CPU IMEM load window |
+| `0x43c2_7000` | PL CPU reset/status/reset-vector control |
+| `0x43c2_9000` | PL CPU display-control MMIO alias |
+| `0x43c3_0000` | PL CPU display2 (LCD console) window |
 
 The detailed PS-side constants live in `hw_bringup/ps_uart_probe.h`.
 

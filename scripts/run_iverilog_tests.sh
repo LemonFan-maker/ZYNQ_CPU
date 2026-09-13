@@ -594,6 +594,7 @@ run_soc() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
     rtl/video/hdmi_console_ram.sv \
@@ -617,6 +618,7 @@ run_soc_sv32() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
     rtl/video/hdmi_console_ram.sv \
@@ -627,6 +629,32 @@ run_soc_sv32() {
     tb/tb_zx32_soc_sv32_ddr.sv
 
   vvp /tmp/zx32_soc_sv32_ddr_tb.vvp
+}
+
+run_lcd_console() {
+  iverilog -g2012 \
+    -I rtl/core \
+    -o /tmp/lcd_console_tb.vvp \
+    rtl/video/lcd_text_console_core.sv \
+    rtl/video/hdmi_console_ram.sv \
+    rtl/video/video_timing.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
+    rtl/core/alu.sv \
+    rtl/core/regfile.sv \
+    rtl/core/zx32_core.sv \
+    rtl/periph/simple_ram.sv \
+    rtl/periph/mmio_uart_tx.sv \
+    rtl/periph/mmio_timer.sv \
+    rtl/periph/mmio_irqctrl.sv \
+    rtl/periph/mmio_gpu_fill.sv \
+    rtl/video/mmio_display_ctrl.sv \
+    rtl/periph/axis_scratchpad.sv \
+    rtl/bus/datamover_ctrl.sv \
+    rtl/bus/axi4_master_bridge.sv \
+    rtl/soc/zx32_soc.sv \
+    tb/tb_lcd_console.sv
+
+  vvp /tmp/lcd_console_tb.vvp
 }
 
 case "$target" in
@@ -662,6 +690,9 @@ case "$target" in
     ;;
   soc64-sv39)
     run_soc64_sv39
+    ;;
+  lcd-console)
+    run_lcd_console
     ;;
   soc64-5stage-sv39)
     run_soc64_5stage_sv39
@@ -752,10 +783,11 @@ case "$target" in
     run_gpu
     run_video
     run_soc
+    run_lcd_console
     run_soc_sv32
     ;;
   *)
-    echo "usage: $0 [core|core64|core64-5stage|soc64|soc64-5stage|soc64-mmio|soc64-host|soc64-bd-host|soc64-ddr|soc64-5stage-ddr|soc64-sv39|soc64-5stage-sv39|soc64-sbi|soc64-5stage-sbi|soc64-real-sbi|soc64-5stage-real-sbi|soc64-linux|soc64-5stage-linux|zx64-fw|zx64-boot-chain|zx64-standard-kernel|zx64-vivado-bitstream|irqctrl|plic|virtio-blk-regs|virtio-input-regs|scratchpad|gpu|video|soc|soc-sv32|all]" >&2
+    echo "usage: $0 [core|core64|core64-5stage|soc64|soc64-5stage|soc64-mmio|soc64-host|soc64-bd-host|soc64-ddr|soc64-5stage-ddr|soc64-sv39|soc64-5stage-sv39|soc64-sbi|soc64-5stage-sbi|soc64-real-sbi|soc64-5stage-real-sbi|soc64-linux|soc64-5stage-linux|zx64-fw|zx64-boot-chain|zx64-standard-kernel|zx64-vivado-bitstream|irqctrl|plic|virtio-blk-regs|virtio-input-regs|scratchpad|gpu|video|soc|soc-sv32|lcd-console|all]" >&2
     exit 2
     ;;
 esac

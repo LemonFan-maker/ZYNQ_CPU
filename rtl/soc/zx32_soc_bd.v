@@ -21,9 +21,26 @@ module zx32_soc_bd (
     output wire [31:0] display_font_wdata,
     output wire [3:0]  display_font_wstrb,
 
+    output wire        lcd_display_enable,
+    output wire [31:0] lcd_display_bg_color,
+    output wire        lcd_display_text_enable,
+    output wire        lcd_display_text_clear,
+    output wire        lcd_display_text_we,
+    output wire [7:0]  lcd_display_text_word_addr,
+    output wire [31:0] lcd_display_text_wdata,
+    output wire [3:0]  lcd_display_text_wstrb,
+    output wire        lcd_display_attr_we,
+    output wire [6:0]  lcd_display_attr_word_addr,
+    output wire [31:0] lcd_display_attr_wdata,
+    output wire [3:0]  lcd_display_attr_wstrb,
+    output wire        lcd_display_font_we,
+    output wire [8:0]  lcd_display_font_word_addr,
+    output wire [31:0] lcd_display_font_wdata,
+    output wire [3:0]  lcd_display_font_wstrb,
+
     input  wire        S_AXI_ACLK,
     input  wire        S_AXI_ARESETN,
-    input  wire [15:0] S_AXI_AWADDR,
+    input  wire [16:0] S_AXI_AWADDR,
     input  wire [2:0]  S_AXI_AWPROT,
     input  wire        S_AXI_AWVALID,
     output wire        S_AXI_AWREADY,
@@ -34,7 +51,7 @@ module zx32_soc_bd (
     output wire [1:0]  S_AXI_BRESP,
     output reg         S_AXI_BVALID,
     input  wire        S_AXI_BREADY,
-    input  wire [15:0] S_AXI_ARADDR,
+    input  wire [16:0] S_AXI_ARADDR,
     input  wire [2:0]  S_AXI_ARPROT,
     input  wire        S_AXI_ARVALID,
     output wire        S_AXI_ARREADY,
@@ -112,8 +129,8 @@ module zx32_soc_bd (
     localparam AXI_READ  = 2'd2;
 
     reg [1:0]  axi_state;
-    reg [15:0] awaddr_q;
-    reg [15:0] araddr_q;
+    reg [16:0] awaddr_q;
+    reg [16:0] araddr_q;
     reg [31:0] wdata_q;
     reg [3:0]  wstrb_q;
     reg        aw_seen;
@@ -140,27 +157,32 @@ module zx32_soc_bd (
     assign host_addr = translate_addr((axi_state == AXI_READ) ? araddr_q : awaddr_q);
 
     function [31:0] translate_addr;
-        input [15:0] axi_addr;
+        input [16:0] axi_addr;
         begin
-            case (axi_addr[15:12])
-                4'h0: translate_addr = 32'h1002_0000 + {20'd0, axi_addr[11:0]};
-                4'h1: translate_addr = 32'h2000_0000 + {20'd0, axi_addr[11:0]};
-                4'h2: translate_addr = 32'h2001_0000 + {20'd0, axi_addr[11:0]};
-                4'h3,
-                4'h4,
-                4'h5,
-                4'h6: translate_addr = {16'd0, axi_addr - 16'h3000};
-                4'h7: translate_addr = 32'h1003_0000 + {20'd0, axi_addr[11:0]};
-                4'h8: translate_addr = 32'h1001_0000 + {20'd0, axi_addr[11:0]};
-                4'h9,
-                4'ha,
-                4'hb,
-                4'hc,
-                4'hd,
-                4'he,
-                4'hf: translate_addr = 32'h1008_0000 + {16'd0, axi_addr - 16'h9000};
-                default: translate_addr = 32'hffff_0000 + {16'd0, axi_addr};
-            endcase
+            if (axi_addr[16]) begin
+                // PS 0x10000..0x1FFFF -> display2 (LCD console) @ 0x1009_0000
+                translate_addr = 32'h1009_0000 + {15'd0, axi_addr[15:0]};
+            end else begin
+                case (axi_addr[15:12])
+                    4'h0: translate_addr = 32'h1002_0000 + {20'd0, axi_addr[11:0]};
+                    4'h1: translate_addr = 32'h2000_0000 + {20'd0, axi_addr[11:0]};
+                    4'h2: translate_addr = 32'h2001_0000 + {20'd0, axi_addr[11:0]};
+                    4'h3,
+                    4'h4,
+                    4'h5,
+                    4'h6: translate_addr = {16'd0, axi_addr[15:0] - 16'h3000};
+                    4'h7: translate_addr = 32'h1003_0000 + {20'd0, axi_addr[11:0]};
+                    4'h8: translate_addr = 32'h1001_0000 + {20'd0, axi_addr[11:0]};
+                    4'h9,
+                    4'ha,
+                    4'hb,
+                    4'hc,
+                    4'hd,
+                    4'he,
+                    4'hf: translate_addr = 32'h1008_0000 + {16'd0, axi_addr[15:0] - 16'h9000};
+                    default: translate_addr = 32'hffff_0000 + {16'd0, axi_addr[15:0]};
+                endcase
+            end
         end
     endfunction
 
@@ -240,6 +262,22 @@ module zx32_soc_bd (
         .display_font_word_addr_o(display_font_word_addr),
         .display_font_wdata_o(display_font_wdata),
         .display_font_wstrb_o(display_font_wstrb),
+        .lcd_display_enable_o(lcd_display_enable),
+        .lcd_display_bg_color_o(lcd_display_bg_color),
+        .lcd_display_text_enable_o(lcd_display_text_enable),
+        .lcd_display_text_clear_o(lcd_display_text_clear),
+        .lcd_display_text_we_o(lcd_display_text_we),
+        .lcd_display_text_word_addr_o(lcd_display_text_word_addr),
+        .lcd_display_text_wdata_o(lcd_display_text_wdata),
+        .lcd_display_text_wstrb_o(lcd_display_text_wstrb),
+        .lcd_display_attr_we_o(lcd_display_attr_we),
+        .lcd_display_attr_word_addr_o(lcd_display_attr_word_addr),
+        .lcd_display_attr_wdata_o(lcd_display_attr_wdata),
+        .lcd_display_attr_wstrb_o(lcd_display_attr_wstrb),
+        .lcd_display_font_we_o(lcd_display_font_we),
+        .lcd_display_font_word_addr_o(lcd_display_font_word_addr),
+        .lcd_display_font_wdata_o(lcd_display_font_wdata),
+        .lcd_display_font_wstrb_o(lcd_display_font_wstrb),
         .host_valid(host_valid),
         .host_we(host_we),
         .host_wstrb(host_wstrb),

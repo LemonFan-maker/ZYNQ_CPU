@@ -58,6 +58,20 @@ module video_timing (
                 h_sync_pos = 1'b1;
                 v_sync_pos = 1'b0;
             end
+            2'd3: begin
+                // 480x272 DE-mode LCD (AN340): HS low-active 10 pix @ x in [500,510),
+                // VS low-active 4 lines @ y in [280,284), HFP=20, VFP=8.
+                h_active_last = 12'd479;
+                v_active_last = 12'd271;
+                h_sync_start = 12'd500;
+                h_sync_end = 12'd509;
+                v_sync_start = 12'd280;
+                v_sync_end = 12'd283;
+                h_total_last = 12'd529;
+                v_total_last = 12'd303;
+                h_sync_pos = 1'b0;
+                v_sync_pos = 1'b0;
+            end
             default: begin
                 h_active_last = 12'd639;
                 v_active_last = 12'd479;

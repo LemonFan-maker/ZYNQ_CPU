@@ -250,6 +250,24 @@ Required work:
 - add HPD and HDMI output-enable pins once their exact AX7020 pins are confirmed in the board constraints
 - rerun Vivado implementation and check timing before treating the HDMI bitstream as board-ready
 
+## Completed: J20 LCD Console Mirror (Display2)
+
+Goal: keep a working text console available even when the HDMI sink is absent.
+
+Delivered:
+
+- second text console on the J20 480x272 DE-mode LCD (60x17 cells), always
+  mirroring the HDMI console's stream (PS fans every console byte into both
+  parsers)
+- `lcd_text_console_core.sv` / `mmio_lcd_display_ctrl.sv` /
+  `lcd_console_top_xilinx.v` + `constraints/ax7020_lcd_j20.xdc`
+- display2 MMIO window at PL `0x1009_0000` (PS alias `0x43c2_0000+0x10000`,
+  128K zx32_soc aperture); rv64 builds keep the LCD cell idle
+- iverilog TB (`tb_lcd_console.sv`, `lcd-console` target) covering clear scan,
+  DE/HS/VS geometry, palette pixels, and the PS host-bus write path
+- board test pending: LCD should show the same boot text as HDMI after
+  `./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl`
+
 ## Next Milestone: Framebuffer Scanout
 
 Goal: continuously scan the reserved VRAM framebuffer to HDMI.

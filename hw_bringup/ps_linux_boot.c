@@ -986,6 +986,11 @@ static const char *linux_loglevel_color(u32 level)
     }
 }
 
+static void lcd_console_putc(u32 ch);
+static void hdmi_console_putc1(u32 ch);
+static void hdmi_console_putc(u32 ch);
+static void lcd_console_init(void);
+
 static u8 hdmi_text_shadow[ZYNQ_CPU_DISPLAY_TEXT_CELLS];
 static u8 hdmi_attr_shadow[ZYNQ_CPU_DISPLAY_TEXT_CELLS];
 static u32 hdmi_text_row;
@@ -1444,7 +1449,7 @@ static int hdmi_console_consume_ansi(u32 ch)
     return 1;
 }
 
-static void hdmi_console_putc(u32 ch)
+static void hdmi_console_putc1(u32 ch)
 {
     if (hdmi_console_consume_ansi(ch)) {
         return;
@@ -1592,6 +1597,627 @@ static void hdmi_console_init(void)
     xil_printf("HDMI init: enable\r\n");
     Xil_Out32(ZYNQ_CPU_DISPLAY_CONTROL, ZYNQ_CPU_DISPLAY_CONTROL_ENABLE);
     xil_printf("HDMI init: done\r\n");
+    lcd_console_init();
+}
+
+// ---------------------------------------------------------------------------
+// LCD console (display2): replica of the HDMI console above for the 480x272
+// DE-mode panel on J20 (60x17 cells). All macros are DISPLAY2 variants; the
+// PS mirrors the console text stream into both outputs (dual putc below).
+// ---------------------------------------------------------------------------
+static u8 lcd_text_shadow[ZYNQ_CPU_DISPLAY2_TEXT_CELLS];
+static u8 lcd_attr_shadow[ZYNQ_CPU_DISPLAY2_TEXT_CELLS];
+static u32 lcd_text_row;
+static u32 lcd_text_col;
+static u8 lcd_text_attr;
+typedef enum {
+    LCD_ESC_NONE = 0,
+    LCD_ESC_ESC,
+    LCD_ESC_CSI,
+} lcd_esc_state_t;
+
+static lcd_esc_state_t lcd_esc_state;
+static u32 lcd_csi_params[4];
+static u32 lcd_csi_param_count;
+static u32 lcd_csi_value;
+static int lcd_csi_have_value;
+
+static void lcd_console_write_attr_word(u32 attr_word_index)
+{
+    u32 cell = attr_word_index * 8U;
+    u32 attr_word = 0U;
+
+    for (u32 i = 0U; i < 8U; i++) {
+        attr_word |= ((u32)(lcd_attr_shadow[cell + i] & 0x0fU)) << (i * 4U);
+    }
+    Xil_Out32(ZYNQ_CPU_DISPLAY2_ATTR_BASE + (attr_word_index * 4U), attr_word);
+}
+
+static void lcd_console_write_word(u32 word_index)
+{
+    u32 cell = word_index * 4U;
+    u32 word = 0U;
+
+    for (u32 i = 0U; i < 4U; i++) {
+        word |= ((u32)lcd_text_shadow[cell + i]) << (i * 8U);
+    }
+    Xil_Out32(ZYNQ_CPU_DISPLAY2_TEXT_BASE + cell, word);
+    lcd_console_write_attr_word(cell >> 3);
+}
+
+static void lcd_console_repaint(void)
+{
+    for (u32 word = 0U; word < (ZYNQ_CPU_DISPLAY2_TEXT_CELLS / 4U); word++) {
+        lcd_console_write_word(word);
+    }
+}
+
+static void lcd_console_clear_shadow(void)
+{
+    for (u32 i = 0U; i < ZYNQ_CPU_DISPLAY2_TEXT_CELLS; i++) {
+        lcd_text_shadow[i] = ' ';
+        lcd_attr_shadow[i] = 0x07U;
+    }
+    lcd_text_row = 0U;
+    lcd_text_col = 0U;
+    lcd_text_attr = 0x07U;
+    lcd_esc_state = LCD_ESC_NONE;
+}
+
+static void lcd_console_upload_font(void)
+{
+    for (u32 word = 0U; word < ZX32_CONSOLE_FONT8X16_WORDS; word++) {
+        Xil_Out32(ZYNQ_CPU_DISPLAY2_FONT_BASE + (word * 4U),
+                  zx32_console_font8x16_words[word]);
+    }
+}
+
+static void lcd_console_scroll(void)
+{
+    for (u32 row = 1U; row < ZYNQ_CPU_DISPLAY2_TEXT_ROWS; row++) {
+        for (u32 col = 0U; col < ZYNQ_CPU_DISPLAY2_TEXT_COLS; col++) {
+            lcd_text_shadow[(row - 1U) * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col] =
+                lcd_text_shadow[row * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col];
+            lcd_attr_shadow[(row - 1U) * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col] =
+                lcd_attr_shadow[row * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col];
+        }
+    }
+    for (u32 col = 0U; col < ZYNQ_CPU_DISPLAY2_TEXT_COLS; col++) {
+        lcd_text_shadow[(ZYNQ_CPU_DISPLAY2_TEXT_ROWS - 1U) * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col] = ' ';
+        lcd_attr_shadow[(ZYNQ_CPU_DISPLAY2_TEXT_ROWS - 1U) * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col] = lcd_text_attr;
+    }
+    lcd_text_row = ZYNQ_CPU_DISPLAY2_TEXT_ROWS - 1U;
+    lcd_text_col = 0U;
+    lcd_console_repaint();
+}
+
+static void lcd_console_newline(void)
+{
+    lcd_text_col = 0U;
+    lcd_text_row++;
+    if (lcd_text_row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS) {
+        lcd_console_scroll();
+    }
+}
+
+static void lcd_console_put_cell(u32 row, u32 col, u8 ch)
+{
+    u32 cell = row * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col;
+
+    lcd_text_shadow[cell] = ch;
+    lcd_attr_shadow[cell] = lcd_text_attr;
+    lcd_console_write_word(cell >> 2);
+}
+
+static u32 lcd_console_cell(u32 row, u32 col)
+{
+    return row * ZYNQ_CPU_DISPLAY2_TEXT_COLS + col;
+}
+
+static void lcd_console_clear_cell_range(u32 start_cell, u32 end_cell)
+{
+    u32 start_word;
+    u32 end_word;
+
+    if (start_cell >= ZYNQ_CPU_DISPLAY2_TEXT_CELLS) {
+        return;
+    }
+    if (end_cell > ZYNQ_CPU_DISPLAY2_TEXT_CELLS) {
+        end_cell = ZYNQ_CPU_DISPLAY2_TEXT_CELLS;
+    }
+    if (start_cell >= end_cell) {
+        return;
+    }
+
+    for (u32 cell = start_cell; cell < end_cell; cell++) {
+        lcd_text_shadow[cell] = ' ';
+        lcd_attr_shadow[cell] = lcd_text_attr;
+    }
+
+    start_word = start_cell >> 2;
+    end_word = (end_cell - 1U) >> 2;
+    for (u32 word = start_word; word <= end_word; word++) {
+        lcd_console_write_word(word);
+    }
+}
+
+static void lcd_console_rewrite_row_words(u32 row, u32 start_col, u32 end_col)
+{
+    u32 start_word;
+    u32 end_word;
+
+    if (row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS || start_col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        return;
+    }
+    if (end_col > ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        end_col = ZYNQ_CPU_DISPLAY2_TEXT_COLS;
+    }
+    if (start_col >= end_col) {
+        return;
+    }
+
+    start_word = lcd_console_cell(row, start_col) >> 2;
+    end_word = lcd_console_cell(row, end_col - 1U) >> 2;
+    for (u32 word = start_word; word <= end_word; word++) {
+        lcd_console_write_word(word);
+    }
+}
+
+static void lcd_console_insert_cells(u32 count)
+{
+    u32 row = lcd_text_row;
+    u32 col = lcd_text_col;
+
+    if (row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    if (count > (ZYNQ_CPU_DISPLAY2_TEXT_COLS - col)) {
+        count = ZYNQ_CPU_DISPLAY2_TEXT_COLS - col;
+    }
+
+    for (u32 dst = ZYNQ_CPU_DISPLAY2_TEXT_COLS - 1U; dst >= col + count; dst--) {
+        u32 dst_cell = lcd_console_cell(row, dst);
+        u32 src_cell = lcd_console_cell(row, dst - count);
+        lcd_text_shadow[dst_cell] = lcd_text_shadow[src_cell];
+        lcd_attr_shadow[dst_cell] = lcd_attr_shadow[src_cell];
+    }
+    for (u32 i = 0U; i < count; i++) {
+        u32 cell = lcd_console_cell(row, col + i);
+        lcd_text_shadow[cell] = ' ';
+        lcd_attr_shadow[cell] = lcd_text_attr;
+    }
+    lcd_console_rewrite_row_words(row, col, ZYNQ_CPU_DISPLAY2_TEXT_COLS);
+}
+
+static void lcd_console_delete_cells(u32 count)
+{
+    u32 row = lcd_text_row;
+    u32 col = lcd_text_col;
+
+    if (row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    if (count > (ZYNQ_CPU_DISPLAY2_TEXT_COLS - col)) {
+        count = ZYNQ_CPU_DISPLAY2_TEXT_COLS - col;
+    }
+
+    for (u32 dst = col; dst + count < ZYNQ_CPU_DISPLAY2_TEXT_COLS; dst++) {
+        u32 dst_cell = lcd_console_cell(row, dst);
+        u32 src_cell = lcd_console_cell(row, dst + count);
+        lcd_text_shadow[dst_cell] = lcd_text_shadow[src_cell];
+        lcd_attr_shadow[dst_cell] = lcd_attr_shadow[src_cell];
+    }
+    for (u32 dst = ZYNQ_CPU_DISPLAY2_TEXT_COLS - count; dst < ZYNQ_CPU_DISPLAY2_TEXT_COLS; dst++) {
+        u32 cell = lcd_console_cell(row, dst);
+        lcd_text_shadow[cell] = ' ';
+        lcd_attr_shadow[cell] = lcd_text_attr;
+    }
+    lcd_console_rewrite_row_words(row, col, ZYNQ_CPU_DISPLAY2_TEXT_COLS);
+}
+
+static void lcd_console_erase_cells(u32 count)
+{
+    u32 row = lcd_text_row;
+    u32 col = lcd_text_col;
+    u32 end;
+
+    if (row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS || col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        return;
+    }
+    if (count == 0U) {
+        count = 1U;
+    }
+    end = col + count;
+    if (end > ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        end = ZYNQ_CPU_DISPLAY2_TEXT_COLS;
+    }
+    lcd_console_clear_cell_range(lcd_console_cell(row, col), lcd_console_cell(row, end));
+}
+
+static void lcd_console_set_cursor(u32 row, u32 col)
+{
+    if (row >= ZYNQ_CPU_DISPLAY2_TEXT_ROWS) {
+        row = ZYNQ_CPU_DISPLAY2_TEXT_ROWS - 1U;
+    }
+    if (col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        col = ZYNQ_CPU_DISPLAY2_TEXT_COLS - 1U;
+    }
+    lcd_text_row = row;
+    lcd_text_col = col;
+}
+
+static u32 lcd_csi_param_or(u32 index, u32 default_value)
+{
+    if (index >= lcd_csi_param_count) {
+        return default_value;
+    }
+    if (lcd_csi_params[index] == 0U) {
+        return default_value;
+    }
+    return lcd_csi_params[index];
+}
+
+static void lcd_csi_push_param(void)
+{
+    if (lcd_csi_param_count < 4U) {
+        lcd_csi_params[lcd_csi_param_count] =
+            lcd_csi_have_value ? lcd_csi_value : 0U;
+        lcd_csi_param_count++;
+    }
+    lcd_csi_value = 0U;
+    lcd_csi_have_value = 0;
+}
+
+static void lcd_csi_reset(void)
+{
+    for (u32 i = 0U; i < 4U; i++) {
+        lcd_csi_params[i] = 0U;
+    }
+    lcd_csi_param_count = 0U;
+    lcd_csi_value = 0U;
+    lcd_csi_have_value = 0;
+}
+
+static int lcd_sgr_color_index(u32 sgr, u8 *color)
+{
+    if (sgr >= 30U && sgr <= 37U) {
+        *color = (u8)(sgr - 30U);
+        return 1;
+    }
+    if (sgr >= 90U && sgr <= 97U) {
+        *color = (u8)(8U + sgr - 90U);
+        return 1;
+    }
+    return 0;
+}
+
+static void lcd_console_apply_sgr(void)
+{
+    u32 count = lcd_csi_param_count;
+    int bright = 0;
+
+    if (count == 0U) {
+        lcd_text_attr = 0x07U;
+        return;
+    }
+
+    for (u32 i = 0U; i < count; i++) {
+        u32 p = lcd_csi_params[i];
+        u8 color;
+
+        if (p == 0U) {
+            lcd_text_attr = 0x07U;
+            bright = 0;
+        } else if (p == 1U) {
+            bright = 1;
+            lcd_text_attr = (u8)((lcd_text_attr & 0x07U) | 0x08U);
+        } else if (p == 22U) {
+            bright = 0;
+            lcd_text_attr = (u8)(lcd_text_attr & 0xf7U);
+        } else if (p == 39U) {
+            lcd_text_attr = 0x07U;
+        } else if (lcd_sgr_color_index(p, &color)) {
+            if (bright && color < 8U) {
+                color = (u8)(color | 0x08U);
+            }
+            lcd_text_attr = color;
+        }
+    }
+}
+
+static void lcd_console_apply_csi(u32 final_ch)
+{
+    u32 p0 = (lcd_csi_param_count > 0U) ? lcd_csi_params[0] : 0U;
+    u32 start;
+    u32 end;
+    u32 n;
+
+    switch (final_ch) {
+    case '@':
+        lcd_console_insert_cells(lcd_csi_param_or(0U, 1U));
+        break;
+    case 'J':
+        if (p0 == 2U || p0 == 3U) {
+            lcd_console_clear_shadow();
+            lcd_console_repaint();
+        } else if (p0 == 1U) {
+            end = lcd_console_cell(lcd_text_row, lcd_text_col) + 1U;
+            lcd_console_clear_cell_range(0U, end);
+        } else {
+            start = lcd_console_cell(lcd_text_row, lcd_text_col);
+            lcd_console_clear_cell_range(start, ZYNQ_CPU_DISPLAY2_TEXT_CELLS);
+        }
+        break;
+    case 'K':
+        if (p0 == 2U) {
+            start = lcd_console_cell(lcd_text_row, 0U);
+            end = start + ZYNQ_CPU_DISPLAY2_TEXT_COLS;
+        } else if (p0 == 1U) {
+            start = lcd_console_cell(lcd_text_row, 0U);
+            end = lcd_console_cell(lcd_text_row, lcd_text_col) + 1U;
+        } else {
+            start = lcd_console_cell(lcd_text_row, lcd_text_col);
+            end = lcd_console_cell(lcd_text_row, ZYNQ_CPU_DISPLAY2_TEXT_COLS - 1U) + 1U;
+        }
+        lcd_console_clear_cell_range(start, end);
+        break;
+    case 'X':
+        lcd_console_erase_cells(lcd_csi_param_or(0U, 1U));
+        break;
+    case 'P':
+        lcd_console_delete_cells(lcd_csi_param_or(0U, 1U));
+        break;
+    case 'H':
+    case 'f':
+        lcd_console_set_cursor(lcd_csi_param_or(0U, 1U) - 1U,
+                                lcd_csi_param_or(1U, 1U) - 1U);
+        break;
+    case 'G':
+        lcd_console_set_cursor(lcd_text_row, lcd_csi_param_or(0U, 1U) - 1U);
+        break;
+    case 'A':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_text_row = (n > lcd_text_row) ? 0U : (lcd_text_row - n);
+        break;
+    case 'B':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_console_set_cursor(lcd_text_row + n, lcd_text_col);
+        break;
+    case 'E':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_console_set_cursor(lcd_text_row + n, 0U);
+        break;
+    case 'F':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_console_set_cursor((n > lcd_text_row) ? 0U : (lcd_text_row - n), 0U);
+        break;
+    case 'C':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_console_set_cursor(lcd_text_row, lcd_text_col + n);
+        break;
+    case 'D':
+        n = lcd_csi_param_or(0U, 1U);
+        lcd_text_col = (n > lcd_text_col) ? 0U : (lcd_text_col - n);
+        break;
+    case 'd':
+        lcd_console_set_cursor(lcd_csi_param_or(0U, 1U) - 1U, lcd_text_col);
+        break;
+    case 'm':
+        lcd_console_apply_sgr();
+        break;
+    default:
+        break;
+    }
+}
+
+static int lcd_console_consume_ansi(u32 ch)
+{
+    if (lcd_esc_state == LCD_ESC_NONE) {
+        if (ch == 0x1bU) {
+            lcd_esc_state = LCD_ESC_ESC;
+            return 1;
+        }
+        return 0;
+    }
+
+    if (lcd_esc_state == LCD_ESC_ESC) {
+        if (ch == '[') {
+            lcd_csi_reset();
+            lcd_esc_state = LCD_ESC_CSI;
+        } else if (ch == 0x1bU) {
+            lcd_esc_state = LCD_ESC_ESC;
+        } else {
+            lcd_esc_state = LCD_ESC_NONE;
+        }
+        return 1;
+    }
+
+    if (ch >= '0' && ch <= '9') {
+        lcd_csi_value = lcd_csi_value * 10U + (ch - '0');
+        lcd_csi_have_value = 1;
+        return 1;
+    }
+    if (ch == ';') {
+        lcd_csi_push_param();
+        return 1;
+    }
+    if (ch == '?' || ch == ' ' || ch == '=') {
+        return 1;
+    }
+    if (ch >= 0x40U && ch <= 0x7eU) {
+        if (lcd_csi_have_value || lcd_csi_param_count == 0U) {
+            lcd_csi_push_param();
+        }
+        lcd_console_apply_csi(ch);
+        lcd_esc_state = LCD_ESC_NONE;
+        return 1;
+    }
+
+    lcd_esc_state = LCD_ESC_NONE;
+    return 1;
+}
+
+static void lcd_console_putc(u32 ch)
+{
+    if (lcd_console_consume_ansi(ch)) {
+        return;
+    }
+    if (ch == '\r') {
+        lcd_text_col = 0U;
+        return;
+    }
+    if (ch == '\n') {
+        lcd_console_newline();
+        return;
+    }
+    if (ch == '\t') {
+        do {
+            lcd_console_putc(' ');
+        } while ((lcd_text_col & 7U) != 0U);
+        return;
+    }
+    if (ch == 8U || ch == 127U) {
+        if (lcd_text_col > 0U) {
+            lcd_text_col--;
+            lcd_console_put_cell(lcd_text_row, lcd_text_col, ' ');
+        }
+        return;
+    }
+    if (ch < 32U || ch > 126U) {
+        ch = '.';
+    }
+
+    lcd_console_put_cell(lcd_text_row, lcd_text_col, (u8)ch);
+    lcd_text_col++;
+    if (lcd_text_col >= ZYNQ_CPU_DISPLAY2_TEXT_COLS) {
+        lcd_console_newline();
+    }
+}
+
+// Console fan-out: every byte of the boot text stream goes to BOTH consoles.
+// Each has its own ANSI parser, so CSI/SGR state stays per-panel.
+static void hdmi_console_putc(u32 ch)
+{
+    hdmi_console_putc1(ch);
+    lcd_console_putc(ch);
+}
+
+static void lcd_console_puts(const char *s)
+{
+    while (*s != '\0') {
+        lcd_console_putc((u8)*s);
+        s++;
+    }
+}
+
+static void lcd_console_put_dec_u32(u32 value)
+{
+    char buf[10];
+    u32 count = 0U;
+
+    if (value == 0U) {
+        lcd_console_putc('0');
+        return;
+    }
+    while (value != 0U && count < sizeof(buf)) {
+        buf[count] = (char)('0' + (value % 10U));
+        value /= 10U;
+        count++;
+    }
+    while (count != 0U) {
+        count--;
+        lcd_console_putc((u8)buf[count]);
+    }
+}
+
+static void lcd_console_put_hex32(u32 value)
+{
+    static const char hex[] = "0123456789abcdef";
+
+    lcd_console_puts("0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        lcd_console_putc((u8)hex[(value >> shift) & 0x0fU]);
+    }
+}
+
+static void lcd_diag_prefix(const char *color, const char *tag)
+{
+    lcd_console_puts("\x1b[90m[");
+    lcd_console_puts("\x1b[1;36mzx32-diag");
+    lcd_console_puts("\x1b[90m] ");
+    lcd_console_puts(color);
+    lcd_console_puts(tag);
+    lcd_console_puts("\x1b[0m ");
+}
+
+static void lcd_diag_line(const char *color, const char *tag, const char *message)
+{
+    lcd_diag_prefix(color, tag);
+    lcd_console_puts(message);
+    lcd_console_putc('\n');
+}
+
+static void lcd_diag_kv_hex(const char *color,
+                             const char *tag,
+                             const char *key0,
+                             u32 value0,
+                             const char *key1,
+                             u32 value1)
+{
+    lcd_diag_prefix(color, tag);
+    lcd_console_puts(key0);
+    lcd_console_putc('=');
+    lcd_console_put_hex32(value0);
+    if (key1 != NULL) {
+        lcd_console_putc(' ');
+        lcd_console_puts(key1);
+        lcd_console_putc('=');
+        lcd_console_put_hex32(value1);
+    }
+    lcd_console_putc('\n');
+}
+
+static void lcd_diag_elapsed(const char *label, XTime start, XTime now)
+{
+    u64 ms = boot_elapsed_ms(start, now);
+
+    lcd_diag_prefix("\x1b[1;35m", "TIME");
+    lcd_console_puts(label);
+    lcd_console_puts(" elapsed=");
+    lcd_console_put_dec_u32((u32)(ms / 1000ULL));
+    lcd_console_putc('.');
+    lcd_console_putc((u8)('0' + ((ms / 100ULL) % 10ULL)));
+    lcd_console_putc((u8)('0' + ((ms / 10ULL) % 10ULL)));
+    lcd_console_putc((u8)('0' + (ms % 10ULL)));
+    lcd_console_putc('s');
+    lcd_console_putc('\n');
+}
+
+static void lcd_console_init(void)
+{
+    // No MODE write: LCD console hardwires timing mode 3 (480x272 DE).
+    xil_printf("LCD init: shadow\r\n");
+    lcd_console_clear_shadow();
+    xil_printf("LCD init: bg\r\n");
+    Xil_Out32(ZYNQ_CPU_DISPLAY2_BG, 0x00000000U);
+    xil_printf("LCD init: font\r\n");
+    lcd_console_upload_font();
+    xil_printf("LCD init: text clear\r\n");
+    Xil_Out32(ZYNQ_CPU_DISPLAY2_TEXT_CTRL,
+              ZYNQ_CPU_DISPLAY2_TEXT_ENABLE | ZYNQ_CPU_DISPLAY2_TEXT_CLEAR);
+    for (volatile u32 delay = 0U; delay < 10000U; delay++) {
+    }
+    xil_printf("LCD init: repaint\r\n");
+    lcd_console_repaint();
+    xil_printf("LCD init: enable\r\n");
+    Xil_Out32(ZYNQ_CPU_DISPLAY2_CONTROL, ZYNQ_CPU_DISPLAY2_CONTROL_ENABLE);
+    xil_printf("LCD init: done\r\n");
 }
 
 static void print_sv32_pte(const char *name, const char *slot, u32 idx, u32 pte_addr, u32 pte)

@@ -152,8 +152,11 @@ read_sv $repo_dir rtl/video/hdmi_test_pattern_core.sv
 read_sv $repo_dir rtl/video/hdmi_console_ram.sv
 read_sv $repo_dir rtl/video/hdmi_text_console_core.sv
 read_sv $repo_dir rtl/video/mmio_display_ctrl.sv
+read_sv $repo_dir rtl/video/mmio_lcd_display_ctrl.sv
+read_sv $repo_dir rtl/video/lcd_text_console_core.sv
 read_sv $repo_dir rtl/video/hdmi_tmds_oserdes_xilinx.sv
 read_v  $repo_dir rtl/video/hdmi_test_pattern_top_xilinx.v
+read_v  $repo_dir rtl/video/lcd_console_top_xilinx.v
 read_sv $repo_dir rtl/periph/axi_lite_bringup_regs.sv
 read_v  $repo_dir rtl/periph/axi_lite_bringup_regs_bd.v
 update_compile_order -fileset sources_1
@@ -171,6 +174,7 @@ if {$soc_kind eq "rv64"} {
 }
 create_bd_cell -type module -reference axi_lite_bringup_regs_bd bringup_regs_0
 create_bd_cell -type module -reference hdmi_test_pattern_top_xilinx hdmi_test_0
+create_bd_cell -type module -reference lcd_console_top_xilinx lcd_console_0
 
 if {$use_datamover} {
     create_bd_cell -type ip -vlnv xilinx.com:ip:axi_datamover:5.1 axi_datamover_0
@@ -212,6 +216,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins process
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins rst_ps7_0_75M/slowest_sync_clk]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins $soc_cell/clk]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins hdmi_test_0/clk_75mhz]
+connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins lcd_console_0/clk_75mhz]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins $soc_cell/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins bringup_regs_0/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins axi_ctrl_smc/aclk]
@@ -232,6 +237,7 @@ if {$use_datamover} {
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins rst_ps7_0_75M/ext_reset_in]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins $soc_cell/rst_n]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins hdmi_test_0/rst_n]
+connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins lcd_console_0/rst_n]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins $soc_cell/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins bringup_regs_0/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins axi_ctrl_smc/aresetn]
@@ -324,6 +330,24 @@ if {$soc_has_display_ports} {
     connect_bd_net [get_bd_pins $soc_cell/display_font_word_addr] [get_bd_pins hdmi_test_0/font_word_addr]
     connect_bd_net [get_bd_pins $soc_cell/display_font_wdata] [get_bd_pins hdmi_test_0/font_wdata]
     connect_bd_net [get_bd_pins $soc_cell/display_font_wstrb] [get_bd_pins hdmi_test_0/font_wstrb]
+
+    # LCD console on J20: text mirror of the HDMI console (display2 window)
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_enable] [get_bd_pins lcd_console_0/lcd_display_enable]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_bg_color] [get_bd_pins lcd_console_0/lcd_display_bg_color]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_enable] [get_bd_pins lcd_console_0/lcd_display_text_enable]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_clear] [get_bd_pins lcd_console_0/lcd_display_text_clear]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_we] [get_bd_pins lcd_console_0/lcd_display_text_we]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_word_addr] [get_bd_pins lcd_console_0/lcd_display_text_word_addr]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_wdata] [get_bd_pins lcd_console_0/lcd_display_text_wdata]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_text_wstrb] [get_bd_pins lcd_console_0/lcd_display_text_wstrb]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_attr_we] [get_bd_pins lcd_console_0/lcd_display_attr_we]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_attr_word_addr] [get_bd_pins lcd_console_0/lcd_display_attr_word_addr]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_attr_wdata] [get_bd_pins lcd_console_0/lcd_display_attr_wdata]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_attr_wstrb] [get_bd_pins lcd_console_0/lcd_display_attr_wstrb]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_font_we] [get_bd_pins lcd_console_0/lcd_display_font_we]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_font_word_addr] [get_bd_pins lcd_console_0/lcd_display_font_word_addr]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_font_wdata] [get_bd_pins lcd_console_0/lcd_display_font_wdata]
+    connect_bd_net [get_bd_pins $soc_cell/lcd_display_font_wstrb] [get_bd_pins lcd_console_0/lcd_display_font_wstrb]
 } else {
     puts "ZYNQ_CPU_SOC=$soc_kind: $soc_ref has no HDMI text/display ports; driving HDMI with fixed test-pattern defaults"
     create_const_net hdmi_const_1b1 1 1 [list hdmi_test_0/display_enable hdmi_test_0/test_pattern_enable]
@@ -340,7 +364,21 @@ if {$soc_has_display_ports} {
     create_const_net hdmi_const_11b0 11 0 [list hdmi_test_0/attr_word_addr]
     create_const_net hdmi_const_9b0 9 0 [list hdmi_test_0/font_word_addr]
     create_const_net hdmi_const_4b0 4 0 [list hdmi_test_0/text_wstrb hdmi_test_0/attr_wstrb hdmi_test_0/font_wstrb]
+    # LCD console idle on rv64: keep DCLK/MMCM running, console disabled
+    create_const_net lcd_const_1b1 1 1 [list lcd_console_0/lcd_display_enable lcd_console_0/lcd_display_text_enable]
+    create_const_net lcd_const_1b0 1 0 [list \
+        lcd_console_0/lcd_display_text_clear \
+        lcd_console_0/lcd_display_text_we \
+        lcd_console_0/lcd_display_attr_we \
+        lcd_console_0/lcd_display_font_we \
+    ]
+    create_const_net lcd_const_32b0 32 0 [list lcd_console_0/lcd_display_bg_color lcd_console_0/lcd_display_text_wdata lcd_console_0/lcd_display_attr_wdata lcd_console_0/lcd_display_font_wdata]
+    create_const_net lcd_const_8b0 8 0 [list lcd_console_0/lcd_display_text_word_addr]
+    create_const_net lcd_const_7b0 7 0 [list lcd_console_0/lcd_display_attr_word_addr]
+    create_const_net lcd_const_9b0 9 0 [list lcd_console_0/lcd_display_font_word_addr]
+    create_const_net lcd_const_4b0 4 0 [list lcd_console_0/lcd_display_text_wstrb lcd_console_0/lcd_display_attr_wstrb lcd_console_0/lcd_display_font_wstrb]
 }
+
 
 make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_P]
 make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_N]
@@ -360,12 +398,36 @@ set_property name HDMI_D1_N [get_bd_ports HDMI_D1_N_0]
 set_property name HDMI_D2_P [get_bd_ports HDMI_D2_P_0]
 set_property name HDMI_D2_N [get_bd_ports HDMI_D2_N_0]
 
+# LCD console panel pins (J20)
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_R]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_G]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_B]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_DCLK]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_HS]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_VS]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_DE]
+
+set_property name LCD_R [get_bd_ports LCD_R_0]
+set_property name LCD_G [get_bd_ports LCD_G_0]
+set_property name LCD_B [get_bd_ports LCD_B_0]
+set_property name LCD_DCLK [get_bd_ports LCD_DCLK_0]
+set_property name LCD_HS [get_bd_ports LCD_HS_0]
+set_property name LCD_VS [get_bd_ports LCD_VS_0]
+set_property name LCD_DE [get_bd_ports LCD_DE_0]
+
 assign_bd_address
 set_property offset 0x43C00000 [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
 set_property range 64K [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
 set soc_seg [get_bd_addr_segs "processing_system7_0/Data/SEG_${soc_cell}_reg0"]
-set_property offset 0x43C10000 $soc_seg
-set_property range 64K $soc_seg
+if {$soc_kind eq "rv32"} {
+    set_property offset 0x43C20000 $soc_seg
+    set_property range 128K $soc_seg
+} else {
+    # rv64 has no display2 window; keep the same base as rv32 so one
+    # ps_uart_probe.h (ZYNQ_CPU_DMA_BASE) serves both bitstreams.
+    set_property offset 0x43C20000 $soc_seg
+    set_property range 64K $soc_seg
+}
 
 validate_bd_design
 save_bd_design
@@ -380,6 +442,7 @@ set wrapper_path [make_wrapper -files [get_files [file join $build_dir zynq_cpu_
 add_files -norecurse $wrapper_path
 set_property top zynq_cpu_system_wrapper [current_fileset]
 read_xdc [file join $repo_dir constraints ax7020_hdmi.xdc]
+read_xdc [file join $repo_dir constraints ax7020_lcd_j20.xdc]
 update_compile_order -fileset sources_1
 
 launch_runs synth_1 -jobs 8
@@ -392,28 +455,33 @@ if {[get_property STATUS [get_runs synth_1]] ne "synth_design Complete!"} {
 }
 
 set_property strategy Performance_ExplorePostRoutePhysOpt [get_runs impl_1]
-launch_runs impl_1 -to_step opt_design -jobs 8
-wait_on_run impl_1
-if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
-    error "impl_1 opt_design did not complete"
+# Vivado 2025.2: after -to_step opt_design, PROGRESS/STATUS reflect the *next*
+# unstarted step (e.g. 33.33% / "Not started place_design"), so they cannot be
+# used as completion evidence. The opt checkpoint file is the ground truth.
+set opt_dcp [file join $build_dir zynq_cpu_hw.runs impl_1 zynq_cpu_system_wrapper_opt.dcp]
+if {![file exists $opt_dcp]} {
+    launch_runs impl_1 -to_step opt_design -jobs 8
+    wait_on_run impl_1
 }
-if {![string match "*opt_design Complete!*" [get_property STATUS [get_runs impl_1]]]} {
-    error "impl_1 opt_design failed: [get_property STATUS [get_runs impl_1]]"
+if {![file exists $opt_dcp]} {
+    error "impl_1 opt_design did not produce $opt_dcp"
 }
 
-open_run impl_1
+# Vivado 2025.2: open_run on a run paused at a -to_step boundary fails
+# ("Run has not been launched"); open the opt checkpoint file directly.
+open_checkpoint $opt_dcp
 report_utilization -hierarchical -hierarchical_depth 8 \
     -file [file join $report_dir zynq_cpu_system_utilization_opt_hier.rpt]
 close_design
 
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
-if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
-    error "impl_1 did not complete"
+# Same 2025.2 caveat: the bitstream file is the completion evidence.
+set bit_file [file join $build_dir zynq_cpu_hw.runs impl_1 zynq_cpu_system_wrapper.bit]
+if {![file exists $bit_file]} {
+    error "impl_1 did not produce $bit_file; STATUS: [get_property STATUS [get_runs impl_1]]"
 }
-if {![string match "*Complete!*" [get_property STATUS [get_runs impl_1]]]} {
-    error "impl_1 failed: [get_property STATUS [get_runs impl_1]]"
-}
+
 
 open_run impl_1
 report_utilization -file [file join $report_dir zynq_cpu_system_utilization.rpt]
