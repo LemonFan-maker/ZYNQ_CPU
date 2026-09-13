@@ -1,5 +1,10 @@
 # Hardware UART Bring-Up
 
+Note (Sep 13, 2026): the soc PS aperture moved from 0x43C10000 to
+0x43C20000 (rv32 128K / rv64 64K, display2 LCD window at +0x10000). The
+PASS records below were taken on the old 0x43C1 bitstream; rerun them on
+the new bitstream + rebuilt probe ELFs before citing them as current.
+
 This is the current board-level bring-up path for the ZYNQ_CPU hardware design.
 
 ## Build Hardware
