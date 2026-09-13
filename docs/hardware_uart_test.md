@@ -5,6 +5,13 @@ Note (Sep 13, 2026): the soc PS aperture moved from 0x43C10000 to
 PASS records below were taken on the old 0x43C1 bitstream; rerun them on
 the new bitstream + rebuilt probe ELFs before citing them as current.
 
+Board result (Sep 13, 2026, 606e321 bitstream, 0x43C20000 aperture): the
+J20 LCD console mirror works on hardware. After
+`./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl`
+the AN340 480x272 LCD shows the same boot text as the HDMI console with
+correct scrolling, and the PL CPU Linux boot path is intact on the new
+aperture.
+
 This is the current board-level bring-up path for the ZYNQ_CPU hardware design.
 
 ## Build Hardware
