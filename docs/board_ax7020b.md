@@ -95,7 +95,28 @@ The current Linux placement is:
 | Artifact | PL CPU address | PS physical address |
 | --- | ---: | ---: |
 | Linux Image | `0x8040_0000` | `0x0040_0000` |
+
 | DTB | `0x8200_0000` | `0x0200_0000` |
+
+## J20 LCD Console (Display2)
+
+The J20 expansion header (PL BANK35, LVCMOS33) drives an AN340-class 4.3"
+480x272 RGB888 DE-mode LCD as a second console that mirrors the HDMI boot
+text. Pin map lives in `constraints/ax7020_lcd_j20.xdc` (same table as the
+classes project panel; RGB/DCLK FAST slew, DRIVE 8). Panel timing: 480x272
+active, HFP=20, HS=10 (low-active), HBP=10, HT=530; VFP=8, VS=4 (low-active),
+VBP=8, VT=304; 9.375 MHz pixel clock with a 180-degree ODDR DCLK.
+
+Console geometry is 60x17 characters of 8x16 (the 8x16 Cascadia font shared
+with the HDMI console). PS access is via the zx32_soc aperture at
+`0x43c2_0000` + `0x10000` (`ZYNQ_CPU_DISPLAY2_*` in `hw_bringup/ps_uart_probe.h`);
+on the PL bus this maps to `0x1009_0000` (see `docs/architecture.md`). The
+`rv64` build has no display2 window: its LCD cell is held disabled with the
+DCLK still running.
+
+Board check: after `./scripts/run_xsct.sh hw_bringup/download_zynq_cpu_linux_boot.xsbl`
+the LCD should show the same boot text as the HDMI console (the PS fans every
+console byte into both parsers).
 
 ## Environment Rule
 

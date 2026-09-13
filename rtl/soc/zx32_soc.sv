@@ -25,6 +25,22 @@ module zx32_soc #(
     output logic [8:0] display_font_word_addr_o,
     output logic [31:0] display_font_wdata_o,
     output logic [3:0] display_font_wstrb_o,
+    output logic lcd_display_enable_o,
+    output logic [31:0] lcd_display_bg_color_o,
+    output logic lcd_display_text_enable_o,
+    output logic lcd_display_text_clear_o,
+    output logic lcd_display_text_we_o,
+    output logic [7:0] lcd_display_text_word_addr_o,
+    output logic [31:0] lcd_display_text_wdata_o,
+    output logic [3:0] lcd_display_text_wstrb_o,
+    output logic lcd_display_attr_we_o,
+    output logic [6:0] lcd_display_attr_word_addr_o,
+    output logic [31:0] lcd_display_attr_wdata_o,
+    output logic [3:0] lcd_display_attr_wstrb_o,
+    output logic lcd_display_font_we_o,
+    output logic [8:0] lcd_display_font_word_addr_o,
+    output logic [31:0] lcd_display_font_wdata_o,
+    output logic [3:0] lcd_display_font_wstrb_o,
 
     input  logic        host_valid,
     input  logic        host_we,
@@ -98,6 +114,7 @@ module zx32_soc #(
     input  logic        M_AXI_DDR_RVALID,
     output logic        M_AXI_DDR_RREADY
 );
+    localparam logic [31:0] DISPLAY2_BASE = 32'h1009_0000;
     localparam logic [31:0] UART_BASE = 32'h1000_0000;
     localparam logic [31:0] TIMER_BASE = 32'h1001_0000;
     localparam logic [31:0] DM_BASE   = 32'h1002_0000;
@@ -252,6 +269,26 @@ module zx32_soc #(
     logic [8:0]  display_font_word_addr;
     logic [31:0] display_font_wdata;
     logic [3:0]  display_font_wstrb;
+    logic        lcd_display_valid;
+    logic        lcd_display_ready;
+    logic [31:0] lcd_display_rdata;
+    logic [31:0] lcd_display_addr;
+    logic        lcd_display_enable;
+    logic [31:0] lcd_display_bg_color;
+    logic        lcd_display_text_enable;
+    logic        lcd_display_text_clear;
+    logic        lcd_display_text_we;
+    logic [7:0]  lcd_display_text_word_addr;
+    logic [31:0] lcd_display_text_wdata;
+    logic [3:0]  lcd_display_text_wstrb;
+    logic        lcd_display_attr_we;
+    logic [6:0]  lcd_display_attr_word_addr;
+    logic [31:0] lcd_display_attr_wdata;
+    logic [3:0]  lcd_display_attr_wstrb;
+    logic        lcd_display_font_we;
+    logic [8:0]  lcd_display_font_word_addr;
+    logic [31:0] lcd_display_font_wdata;
+    logic [3:0]  lcd_display_font_wstrb;
     logic        dm_valid;
     logic        dm_ready;
     logic [31:0] dm_rdata;
@@ -371,6 +408,8 @@ module zx32_soc #(
     assign bus_wstrb = host_valid ? host_wstrb : dmem_wstrb;
     assign bus_addr = host_valid ? host_addr : dmem_addr;
     assign bus_wdata = host_valid ? host_wdata : dmem_wdata;
+    assign lcd_display_valid = bus_valid && bus_addr[31:16] == DISPLAY2_BASE[31:16];
+    assign lcd_display_addr = bus_addr - DISPLAY2_BASE;
 
     assign ram_dmem_valid = bus_valid && bus_addr[31:16] == 16'h0000;
     assign uart_valid = bus_valid && bus_addr[31:16] == UART_BASE[31:16];
@@ -512,6 +551,22 @@ module zx32_soc #(
     assign display_font_word_addr_o = display_font_word_addr;
     assign display_font_wdata_o = display_font_wdata;
     assign display_font_wstrb_o = display_font_wstrb;
+    assign lcd_display_enable_o = lcd_display_enable;
+    assign lcd_display_bg_color_o = lcd_display_bg_color;
+    assign lcd_display_text_enable_o = lcd_display_text_enable;
+    assign lcd_display_text_clear_o = lcd_display_text_clear;
+    assign lcd_display_text_we_o = lcd_display_text_we;
+    assign lcd_display_text_word_addr_o = lcd_display_text_word_addr;
+    assign lcd_display_text_wdata_o = lcd_display_text_wdata;
+    assign lcd_display_text_wstrb_o = lcd_display_text_wstrb;
+    assign lcd_display_attr_we_o = lcd_display_attr_we;
+    assign lcd_display_attr_word_addr_o = lcd_display_attr_word_addr;
+    assign lcd_display_attr_wdata_o = lcd_display_attr_wdata;
+    assign lcd_display_attr_wstrb_o = lcd_display_attr_wstrb;
+    assign lcd_display_font_we_o = lcd_display_font_we;
+    assign lcd_display_font_word_addr_o = lcd_display_font_word_addr;
+    assign lcd_display_font_wdata_o = lcd_display_font_wdata;
+    assign lcd_display_font_wstrb_o = lcd_display_font_wstrb;
     assign dbg_bus_state = {20'd0,
                             ddr_req_valid,
                             ddr_req_we,
@@ -869,6 +924,9 @@ module zx32_soc #(
         end else if (gpu_valid) begin
             bus_ready = gpu_ready;
             bus_rdata = gpu_rdata;
+        end else if (lcd_display_valid) begin
+            bus_ready = lcd_display_ready;
+            bus_rdata = lcd_display_rdata;
         end else if (display_valid) begin
             bus_ready = display_ready;
             bus_rdata = display_rdata;
@@ -1038,6 +1096,35 @@ module zx32_soc #(
         .font_word_addr(display_font_word_addr),
         .font_wdata(display_font_wdata),
         .font_wstrb(display_font_wstrb)
+    );
+
+    mmio_lcd_display_ctrl u_lcd_display_ctrl (
+        .clk(clk),
+        .rst_n(rst_n),
+        .valid(lcd_display_valid),
+        .we(bus_we),
+        .wstrb(bus_wstrb),
+        .addr(lcd_display_addr),
+        .wdata(bus_wdata),
+        .ready(lcd_display_ready),
+        .rdata(lcd_display_rdata),
+        .frame_done_i(1'b0),
+        .display_enable(lcd_display_enable),
+        .bg_color(lcd_display_bg_color),
+        .text_enable(lcd_display_text_enable),
+        .text_clear(lcd_display_text_clear),
+        .text_we(lcd_display_text_we),
+        .text_word_addr(lcd_display_text_word_addr),
+        .text_wdata(lcd_display_text_wdata),
+        .text_wstrb(lcd_display_text_wstrb),
+        .attr_we(lcd_display_attr_we),
+        .attr_word_addr(lcd_display_attr_word_addr),
+        .attr_wdata(lcd_display_attr_wdata),
+        .attr_wstrb(lcd_display_attr_wstrb),
+        .font_we(lcd_display_font_we),
+        .font_word_addr(lcd_display_font_word_addr),
+        .font_wdata(lcd_display_font_wdata),
+        .font_wstrb(lcd_display_font_wstrb)
     );
 
     datamover_ctrl u_datamover_ctrl (

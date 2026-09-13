@@ -1,0 +1,63 @@
+# AN340-class 4.3" 480x272 RGB888 DE-mode LCD on J20 (BANK35, LVCMOS33).
+# Pin assignment copied verbatim from the classes project (same panel family,
+# measured good on an AX7020B J20 expansion slot; classes module J3 pin N =
+# J20 pin N). RGB/DCLK fast slew, all drive 8.
+
+# LCD_R[7:0]
+set_property PACKAGE_PIN R14 [get_ports {LCD_R[0]}]
+set_property PACKAGE_PIN P14 [get_ports {LCD_R[1]}]
+set_property PACKAGE_PIN U12 [get_ports {LCD_R[2]}]
+set_property PACKAGE_PIN T12 [get_ports {LCD_R[3]}]
+set_property PACKAGE_PIN T15 [get_ports {LCD_R[4]}]
+set_property PACKAGE_PIN T14 [get_ports {LCD_R[5]}]
+set_property PACKAGE_PIN T11 [get_ports {LCD_R[6]}]
+set_property PACKAGE_PIN T10 [get_ports {LCD_R[7]}]
+# LCD_G[7:0]
+set_property PACKAGE_PIN U15 [get_ports {LCD_G[0]}]
+set_property PACKAGE_PIN U14 [get_ports {LCD_G[1]}]
+set_property PACKAGE_PIN P19 [get_ports {LCD_G[2]}]
+set_property PACKAGE_PIN N18 [get_ports {LCD_G[3]}]
+set_property PACKAGE_PIN R17 [get_ports {LCD_G[4]}]
+set_property PACKAGE_PIN R16 [get_ports {LCD_G[5]}]
+set_property PACKAGE_PIN P15 [get_ports {LCD_G[6]}]
+set_property PACKAGE_PIN P16 [get_ports {LCD_G[7]}]
+# LCD_B[7:0]
+set_property PACKAGE_PIN N17 [get_ports {LCD_B[0]}]
+set_property PACKAGE_PIN P18 [get_ports {LCD_B[1]}]
+set_property PACKAGE_PIN V16 [get_ports {LCD_B[2]}]
+set_property PACKAGE_PIN W16 [get_ports {LCD_B[3]}]
+set_property PACKAGE_PIN R18 [get_ports {LCD_B[4]}]
+set_property PACKAGE_PIN T17 [get_ports {LCD_B[5]}]
+set_property PACKAGE_PIN W19 [get_ports {LCD_B[6]}]
+set_property PACKAGE_PIN W18 [get_ports {LCD_B[7]}]
+# Control
+set_property PACKAGE_PIN W20 [get_ports LCD_DCLK]
+set_property PACKAGE_PIN V20 [get_ports LCD_HS]
+set_property PACKAGE_PIN P20 [get_ports LCD_VS]
+set_property PACKAGE_PIN N20 [get_ports LCD_DE]
+
+set_property IOSTANDARD LVCMOS33 [get_ports -quiet {LCD_R[*]}]
+set_property IOSTANDARD LVCMOS33 [get_ports -quiet {LCD_G[*]}]
+set_property IOSTANDARD LVCMOS33 [get_ports -quiet {LCD_B[*]}]
+set_property IOSTANDARD LVCMOS33 [get_ports LCD_DCLK]
+set_property IOSTANDARD LVCMOS33 [get_ports LCD_HS]
+set_property IOSTANDARD LVCMOS33 [get_ports LCD_VS]
+set_property IOSTANDARD LVCMOS33 [get_ports LCD_DE]
+
+set_property SLEW FAST [get_ports -quiet {LCD_R[*]}]
+set_property SLEW FAST [get_ports -quiet {LCD_G[*]}]
+set_property SLEW FAST [get_ports -quiet {LCD_B[*]}]
+set_property SLEW FAST [get_ports LCD_DCLK]
+set_property DRIVE 8 [get_ports -quiet {LCD_R[*]}]
+set_property DRIVE 8 [get_ports -quiet {LCD_G[*]}]
+set_property DRIVE 8 [get_ports -quiet {LCD_B[*]}]
+set_property DRIVE 8 [get_ports LCD_DCLK]
+set_property DRIVE 8 [get_ports LCD_HS]
+set_property DRIVE 8 [get_ports LCD_VS]
+set_property DRIVE 8 [get_ports LCD_DE]
+
+# sys-domain config/clear fan into the pixel domain: same false-path recipe
+# as the HDMI console (constraints/ax7020_hdmi.xdc), instance lcd_console_0.
+set_false_path -to [get_pins -hier -quiet -regexp {.*lcd_console_0/inst/rst_video_sync_reg\[[0-9]+\]/R}]
+set_false_path -to [get_pins -hier -quiet -regexp {.*lcd_console_0/inst/u_core/(enable_meta_reg|text_enable_meta_reg)/D}]
+set_false_path -to [get_pins -hier -quiet -regexp {.*lcd_console_0/inst/u_core/bg_color_meta_reg\[[0-9]+\]/D}]

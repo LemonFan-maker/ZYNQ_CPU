@@ -96,6 +96,7 @@ run_soc() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
     rtl/video/hdmi_console_ram.sv \
@@ -119,6 +120,7 @@ run_soc_sv32() {
     rtl/periph/mmio_uart_tx.sv \
     rtl/periph/mmio_timer.sv \
     rtl/periph/mmio_irqctrl.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
     rtl/periph/mmio_gpu_fill.sv \
     rtl/video/mmio_display_ctrl.sv \
     rtl/video/hdmi_console_ram.sv \
@@ -129,6 +131,33 @@ run_soc_sv32() {
     tb/tb_zx32_soc_sv32_ddr.sv
 
   vvp /tmp/zx32_soc_sv32_ddr_tb.vvp
+}
+
+
+run_lcd_console() {
+  iverilog -g2012 \
+    -I rtl/core \
+    -o /tmp/lcd_console_tb.vvp \
+    rtl/video/lcd_text_console_core.sv \
+    rtl/video/hdmi_console_ram.sv \
+    rtl/video/video_timing.sv \
+    rtl/video/mmio_lcd_display_ctrl.sv \
+    rtl/core/alu.sv \
+    rtl/core/regfile.sv \
+    rtl/core/zx32_core.sv \
+    rtl/periph/simple_ram.sv \
+    rtl/periph/mmio_uart_tx.sv \
+    rtl/periph/mmio_timer.sv \
+    rtl/periph/mmio_irqctrl.sv \
+    rtl/periph/mmio_gpu_fill.sv \
+    rtl/video/mmio_display_ctrl.sv \
+    rtl/periph/axis_scratchpad.sv \
+    rtl/bus/datamover_ctrl.sv \
+    rtl/bus/axi4_master_bridge.sv \
+    rtl/soc/zx32_soc.sv \
+    tb/tb_lcd_console.sv
+
+  vvp /tmp/lcd_console_tb.vvp
 }
 
 case "$target" in
@@ -144,6 +173,10 @@ case "$target" in
   gpu)
     run_gpu
     ;;
+  lcd-console)
+    run_lcd_console
+    ;;
+
   video)
     run_video
     ;;
@@ -161,9 +194,10 @@ case "$target" in
     run_video
     run_soc
     run_soc_sv32
+    run_lcd_console
     ;;
   *)
-    echo "usage: $0 [core|irqctrl|scratchpad|gpu|video|soc|soc-sv32|all]" >&2
+    echo "usage: $0 [core|irqctrl|scratchpad|gpu|video|soc|soc-sv32|lcd-console|all]" >&2
     exit 2
     ;;
 esac

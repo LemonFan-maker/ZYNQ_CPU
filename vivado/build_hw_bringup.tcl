@@ -41,8 +41,11 @@ read_verilog -sv [file join $repo_dir rtl video hdmi_test_pattern_core.sv]
 read_verilog -sv [file join $repo_dir rtl video hdmi_console_ram.sv]
 read_verilog -sv [file join $repo_dir rtl video hdmi_text_console_core.sv]
 read_verilog -sv [file join $repo_dir rtl video mmio_display_ctrl.sv]
+read_verilog -sv [file join $repo_dir rtl video mmio_lcd_display_ctrl.sv]
+read_verilog -sv [file join $repo_dir rtl video lcd_text_console_core.sv]
 read_verilog -sv [file join $repo_dir rtl video hdmi_tmds_oserdes_xilinx.sv]
 read_verilog [file join $repo_dir rtl video hdmi_test_pattern_top_xilinx.v]
+read_verilog [file join $repo_dir rtl video lcd_console_top_xilinx.v]
 read_verilog -sv [file join $repo_dir rtl periph axis_scratchpad.sv]
 read_verilog -sv [file join $repo_dir rtl periph axi_lite_bringup_regs.sv]
 read_verilog -sv [file join $repo_dir rtl bus datamover_ctrl.sv]
@@ -62,6 +65,7 @@ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 rst_ps7_0_75M
 create_bd_cell -type module -reference zx32_soc_bd zx32_soc_0
 create_bd_cell -type module -reference axi_lite_bringup_regs_bd bringup_regs_0
 create_bd_cell -type module -reference hdmi_test_pattern_top_xilinx hdmi_test_0
+create_bd_cell -type module -reference lcd_console_top_xilinx lcd_console_0
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_datamover:5.1 axi_datamover_0
 set_property -dict [list \
@@ -97,6 +101,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins process
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins rst_ps7_0_75M/slowest_sync_clk]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins zx32_soc_0/clk]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins hdmi_test_0/clk_75mhz]
+connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins lcd_console_0/clk_75mhz]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins zx32_soc_0/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins bringup_regs_0/S_AXI_ACLK]
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins axi_ctrl_smc/aclk]
@@ -113,6 +118,7 @@ connect_bd_net [get_bd_pins processing_system7_0/FCLK_CLK0] [get_bd_pins axi_dat
 connect_bd_net [get_bd_pins processing_system7_0/FCLK_RESET0_N] [get_bd_pins rst_ps7_0_75M/ext_reset_in]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins zx32_soc_0/rst_n]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins hdmi_test_0/rst_n]
+connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins lcd_console_0/rst_n]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins zx32_soc_0/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins bringup_regs_0/S_AXI_ARESETN]
 connect_bd_net [get_bd_pins rst_ps7_0_75M/peripheral_aresetn] [get_bd_pins axi_ctrl_smc/aresetn]
@@ -179,6 +185,24 @@ connect_bd_net [get_bd_pins zx32_soc_0/display_font_word_addr] [get_bd_pins hdmi
 connect_bd_net [get_bd_pins zx32_soc_0/display_font_wdata] [get_bd_pins hdmi_test_0/font_wdata]
 connect_bd_net [get_bd_pins zx32_soc_0/display_font_wstrb] [get_bd_pins hdmi_test_0/font_wstrb]
 
+# LCD console on J20: text mirror of the HDMI console (display2 window)
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_enable] [get_bd_pins lcd_console_0/lcd_display_enable]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_bg_color] [get_bd_pins lcd_console_0/lcd_display_bg_color]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_enable] [get_bd_pins lcd_console_0/lcd_display_text_enable]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_clear] [get_bd_pins lcd_console_0/lcd_display_text_clear]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_we] [get_bd_pins lcd_console_0/lcd_display_text_we]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_word_addr] [get_bd_pins lcd_console_0/lcd_display_text_word_addr]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_wdata] [get_bd_pins lcd_console_0/lcd_display_text_wdata]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_text_wstrb] [get_bd_pins lcd_console_0/lcd_display_text_wstrb]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_attr_we] [get_bd_pins lcd_console_0/lcd_display_attr_we]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_attr_word_addr] [get_bd_pins lcd_console_0/lcd_display_attr_word_addr]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_attr_wdata] [get_bd_pins lcd_console_0/lcd_display_attr_wdata]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_attr_wstrb] [get_bd_pins lcd_console_0/lcd_display_attr_wstrb]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_font_we] [get_bd_pins lcd_console_0/lcd_display_font_we]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_font_word_addr] [get_bd_pins lcd_console_0/lcd_display_font_word_addr]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_font_wdata] [get_bd_pins lcd_console_0/lcd_display_font_wdata]
+connect_bd_net [get_bd_pins zx32_soc_0/lcd_display_font_wstrb] [get_bd_pins lcd_console_0/lcd_display_font_wstrb]
+
 make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_P]
 make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_CLK_N]
 make_bd_pins_external [get_bd_pins hdmi_test_0/HDMI_D0_P]
@@ -197,11 +221,28 @@ set_property name HDMI_D1_N [get_bd_ports HDMI_D1_N_0]
 set_property name HDMI_D2_P [get_bd_ports HDMI_D2_P_0]
 set_property name HDMI_D2_N [get_bd_ports HDMI_D2_N_0]
 
+# LCD console panel pins (J20)
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_R]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_G]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_B]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_DCLK]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_HS]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_VS]
+make_bd_pins_external [get_bd_pins lcd_console_0/LCD_DE]
+
+set_property name LCD_R [get_bd_ports LCD_R_0]
+set_property name LCD_G [get_bd_ports LCD_G_0]
+set_property name LCD_B [get_bd_ports LCD_B_0]
+set_property name LCD_DCLK [get_bd_ports LCD_DCLK_0]
+set_property name LCD_HS [get_bd_ports LCD_HS_0]
+set_property name LCD_VS [get_bd_ports LCD_VS_0]
+set_property name LCD_DE [get_bd_ports LCD_DE_0]
+
 assign_bd_address
 set_property offset 0x43C00000 [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
 set_property range 64K [get_bd_addr_segs {processing_system7_0/Data/SEG_bringup_regs_0_reg0}]
-set_property offset 0x43C10000 [get_bd_addr_segs {processing_system7_0/Data/SEG_zx32_soc_0_reg0}]
-set_property range 64K [get_bd_addr_segs {processing_system7_0/Data/SEG_zx32_soc_0_reg0}]
+set_property offset 0x43C20000 [get_bd_addr_segs {processing_system7_0/Data/SEG_zx32_soc_0_reg0}]
+set_property range 128K [get_bd_addr_segs {processing_system7_0/Data/SEG_zx32_soc_0_reg0}]
 
 validate_bd_design
 save_bd_design
@@ -216,6 +257,7 @@ set wrapper_path [make_wrapper -files [get_files [file join $build_dir zynq_cpu_
 add_files -norecurse $wrapper_path
 set_property top zynq_cpu_system_wrapper [current_fileset]
 read_xdc [file join $repo_dir constraints ax7020_hdmi.xdc]
+read_xdc [file join $repo_dir constraints ax7020_lcd_j20.xdc]
 update_compile_order -fileset sources_1
 
 launch_runs synth_1 -jobs 8
@@ -230,11 +272,11 @@ if {[get_property STATUS [get_runs synth_1]] ne "synth_design Complete!"} {
 set_property strategy Performance_ExplorePostRoutePhysOpt [get_runs impl_1]
 launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
-if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
-    error "impl_1 did not complete"
-}
-if {![string match "*Complete!*" [get_property STATUS [get_runs impl_1]]]} {
-    error "impl_1 failed: [get_property STATUS [get_runs impl_1]]"
+# Vivado 2025.2: run PROGRESS/STATUS are unreliable completion evidence; the
+# bitstream file is the ground truth.
+set bit_file [file join $build_dir zynq_cpu_hw.runs impl_1 zynq_cpu_system_wrapper.bit]
+if {![file exists $bit_file]} {
+    error "impl_1 did not produce $bit_file; STATUS: [get_property STATUS [get_runs impl_1]]"
 }
 
 open_run impl_1

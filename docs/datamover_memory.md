@@ -82,15 +82,16 @@ Status bits from `rtl/bus/datamover_ctrl.sv`:
 ## PS Probe DataMover Aperture
 
 The ARM-side bring-up probe sees the DataMover/control aperture at
-`0x43c1_0000`.
+`0x43c2_0000` (the zx32/zx64 soc aperture, 128K on rv32 / 64K on rv64; the
+rv32 display2 LCD window sits at +0x10000).
 
 | PS address | Purpose |
 | ---: | --- |
-| `0x43c1_0000` | DataMover control |
-| `0x43c1_1000` | RX scratch |
-| `0x43c1_2000` | TX scratch and mailbox |
-| `0x43c1_3000` | PL CPU IMEM load window |
-| `0x43c1_7000` | PL CPU reset/status/reset-vector |
+| `0x43c2_0000` | DataMover control |
+| `0x43c2_1000` | RX scratch |
+| `0x43c2_2000` | TX scratch and mailbox |
+| `0x43c2_3000` | PL CPU IMEM load window |
+| `0x43c2_7000` | PL CPU reset/status/reset-vector |
 
 ## Scratchpad
 
